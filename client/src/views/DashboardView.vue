@@ -464,7 +464,12 @@
                   <span v-if="k.type === 'ADMIN'" class="bg-yellow-500/20 text-yellow-300 text-[10px] font-black px-2 py-0.5 rounded uppercase border border-yellow-500/30">Admin Key</span>
                   <span v-if="!k.is_active" class="bg-red-500/20 text-red-300 text-[10px] font-black px-2 py-0.5 rounded uppercase border border-red-500/30">Disabled</span>
               </div>
-              <code class="text-sm font-mono text-teal-200/80 bg-black/20 px-2 py-1 rounded break-all">{{ k.key }}</code>
+              <div class="flex items-center gap-2">
+                <code class="text-sm font-mono text-teal-200/80 bg-black/20 px-2 py-1 rounded break-all">{{ k.key }}</code>
+                <button @click="copyToClipboard(k.key)" class="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/50 hover:text-white transition-colors" title="复制密钥">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                </button>
+              </div>
               <span class="text-xs text-white/30 mt-2">创建于 {{ new Date(k.created_at).toLocaleDateString() }}</span>
             </div>
             
@@ -1004,6 +1009,21 @@ const deleteCredential = async (id: number) => {
         fetchStats();
     } catch(e) {
         alert('删除失败');
+    }
+};
+
+const copyToClipboard = async (text: string) => {
+    try {
+        await navigator.clipboard.writeText(text);
+        const btn = document.activeElement as HTMLButtonElement;
+        if(btn) {
+            const originalHTML = btn.innerHTML;
+            btn.innerHTML = '<span class="text-xs font-bold px-1">已复制</span>';
+            setTimeout(() => { btn.innerHTML = originalHTML; }, 1500);
+        }
+    } catch (err) {
+        console.error('Failed to copy', err);
+        alert('复制失败，请手动复制');
     }
 };
 
