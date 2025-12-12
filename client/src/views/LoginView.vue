@@ -71,7 +71,7 @@
               <button
                 type="button"
                 @click="loginWithDiscordApp"
-                class="flex-1 py-3 bg-black/30 hover:bg-black/40 text-white font-bold rounded-r-full rounded-l-md flex items-center justify-center gap-2 transition-colors border border-white/10"
+                class="flex-1 py-3 bg-[#5865F2] hover:bg-[#4752C4] text-white font-bold rounded-r-full rounded-l-md flex items-center justify-center gap-2 transition-colors"
               >
                 <span>App 授权</span>
               </button>
