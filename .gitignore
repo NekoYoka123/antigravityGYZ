@@ -35,3 +35,14 @@ coverage/
 # Prisma
 prisma/*.db
 prisma/*.db-journal
+
+# AL (from remote template, kept just in case)
+.alcache/
+.alpackages/
+.snapshots/
+.output/
+*.app
+rad.json
+*.g.xlf
+*.flf
+TestResults.xml
