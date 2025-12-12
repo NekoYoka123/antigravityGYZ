@@ -13,7 +13,7 @@
       </div>
 
       <!-- User Profile Section -->
-      <div class="p-6 border-b border-white/10 flex flex-col items-center lg:items-start gap-4">
+      <div class="p-6 border-b border-white/10 flex flex-col items-center lg:items-start gap-4 flex-shrink-0">
         <div class="relative group cursor-pointer">
             <div class="w-16 h-16 rounded-2xl shadow-lg border-2 border-white/20 overflow-hidden group-hover:border-pink-400 transition-all bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-2xl font-bold">
                 <img v-if="userInfo.discordAvatar" :src="userInfo.discordAvatar" class="w-full h-full object-cover" alt="Discord Avatar">
@@ -28,7 +28,7 @@
         </div>
       </div>
 
-      <nav class="flex-1 px-4 py-8 space-y-4">
+      <nav class="flex-1 px-4 py-8 space-y-4 overflow-y-auto custom-scrollbar">
         <button @click="currentTab = 'home'" :class="tabClass('home')">
           <span class="text-2xl">🏠</span>
           <span class="hidden lg:block">概览</span>
@@ -47,11 +47,6 @@
         </button>
       </nav>
 
-      <div class="p-6">
-        <button @click="logout" class="w-full py-3 rounded-full bg-white/10 hover:bg-red-500/20 text-white/70 hover:text-red-300 font-bold transition-colors flex items-center justify-center gap-2">
-          <span>🚪</span> <span class="hidden lg:inline">退出</span>
-        </button>
-      </div>
     </aside>
 
     <main class="flex-1 md:ml-24 lg:ml-64 min-h-screen overflow-y-auto p-4 md:p-10 pb-24 relative z-10">
@@ -63,6 +58,9 @@
           <p class="text-white/60 text-sm md:text-lg">今天是充满希望的一天 ✨</p>
         </div>
         <div class="flex items-center gap-2">
+          <button @click="logout" class="text-xs px-3 py-1 rounded-full bg-white/10 hover:bg-red-500/20 hover:text-red-300 font-bold transition-colors">
+            退出
+          </button>
           <button v-if="!userInfo.discordId" @click="bindDiscord" class="text-xs px-3 py-1 rounded-full bg-[#5865F2] hover:bg-[#4752C4] font-bold">
             绑定 Discord
           </button>
@@ -72,7 +70,6 @@
           <button @click="currentTab = 'upload'" class="text-xs px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 font-bold">
             上传
           </button>
-          <button @click="logout" class="md:hidden text-sm bg-white/10 px-3 py-1 rounded-full">退出</button>
         </div>
       </header>
       
@@ -1032,5 +1029,20 @@ onMounted(() => {
 /* iPhone 底部安全区适配 */
 .pb-safe {
   padding-bottom: 20px;
+}
+
+/* 自定义滚动条 */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 </style>
