@@ -159,55 +159,51 @@
           </button>
         </div>
 
-        <!-- 反重力仪表盘（放在 CLI 反代仪表盘下面） -->
-        <div 
+        <!-- 反重力仪表盘 (Combined & Compact) -->
+        <div
           v-motion
           :initial="{ opacity: 0, y: 50 }"
           :enter="{ opacity: 1, y: 0, transition: { type: 'spring', stiffness: 200, delay: 350 } }"
           :hover="{ scale: 1.01 }"
-          class="col-span-2 row-span-2 bg-gradient-to-br from-purple-900/40 to-fuchsia-900/40 rounded-[30px] p-5 text-purple-200 flex flex-col shadow-xl border border-purple-500/30 relative overflow-hidden"
+          class="col-span-1 md:col-span-2 lg:col-span-4 row-span-1 rounded-[30px] overflow-hidden shadow-xl flex flex-col md:flex-row border border-white/20"
         >
-          <div class="mb-2">
-            <div class="text-[10px] uppercase tracking-widest opacity-70 font-black">Antigravity • Claude 4.5</div>
+          <!-- Left: Claude -->
+          <div class="flex-1 bg-gradient-to-br from-purple-900/40 to-fuchsia-900/40 p-4 text-purple-200 flex items-center justify-between relative border-b md:border-b-0 md:border-r border-white/10">
+            <div class="flex flex-col justify-center z-10">
+              <div class="text-xs uppercase tracking-widest opacity-70 font-black mb-1">Antigravity • Claude 4.5</div>
+              <div class="text-2xl font-black">
+                {{ stats.antigravity_usage?.claude || 0 }} <span class="text-sm opacity-50">/ {{ stats.antigravity_usage?.limits?.claude || 100 }}</span>
+              </div>
+            </div>
+            <div class="h-24 w-32 flex items-center justify-center">
+              <GaugeChart
+                :current="stats.antigravity_usage?.claude || 0"
+                :max="stats.antigravity_usage?.limits?.claude || 100"
+                progressColor="#a78bfa"
+                textColor="transparent"
+              />
+            </div>
           </div>
-          <div class="flex-1 flex items-center justify-center -mt-2 transform scale-95">
-            <GaugeChart 
-              :current="stats.antigravity_usage?.claude || 0" 
-              :max="stats.antigravity_usage?.limits?.claude || 100" 
-              progressColor="#a78bfa" 
-              textColor="text-purple-200" 
-            />
-          </div>
-          <div class="mt-3 text-[11px] font-bold text-purple-200/80 text-center">
-            今日：{{ stats.antigravity_usage?.claude || 0 }} / {{ stats.antigravity_usage?.limits?.claude || 100 }}
-          </div>
-        </div>
 
-        <div 
-          v-motion
-          :initial="{ opacity: 0, y: 50 }"
-          :enter="{ opacity: 1, y: 0, transition: { type: 'spring', stiffness: 200, delay: 400 } }"
-          :hover="{ scale: 1.01 }"
-          class="col-span-2 row-span-2 bg-gradient-to-br from-cyan-900/40 to-teal-900/40 rounded-[30px] p-5 text-cyan-200 flex flex-col shadow-xl border border-cyan-500/30 relative overflow-hidden"
-        >
-          <div class="mb-2">
-            <div class="text-[10px] uppercase tracking-widest opacity-70 font-black">Antigravity • Gemini 3.0</div>
-          </div>
-          <div class="flex-1 flex items-center justify-center -mt-2 transform scale-95">
-            <GaugeChart 
-              :current="stats.antigravity_usage?.gemini3 || 0" 
-              :max="stats.antigravity_usage?.limits?.gemini3 || 200" 
-              progressColor="#22d3ee" 
-              textColor="text-cyan-200" 
-            />
-          </div>
-          <div class="mt-3 text-[11px] font-bold text-cyan-200/80 text-center">
-            今日：{{ stats.antigravity_usage?.gemini3 || 0 }} / {{ stats.antigravity_usage?.limits?.gemini3 || 200 }}
-          </div>
-          <div class="mt-4 flex items-center justify-center">
-            <button @click="currentTab = 'antigravity'" class="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-teal-600 text-white text-xs font-bold hover:from-cyan-500 hover:to-teal-500 transition-all shadow-lg shadow-cyan-500/30">
-              上传反重力凭证
-            </button>
+          <!-- Right: Gemini -->
+          <div class="flex-1 bg-gradient-to-br from-cyan-900/40 to-teal-900/40 p-4 text-cyan-200 flex items-center justify-between relative">
+            <div class="flex flex-col justify-center z-10">
+              <div class="text-xs uppercase tracking-widest opacity-70 font-black mb-1">Antigravity • Gemini 3.0</div>
+              <div class="text-2xl font-black mb-2">
+                {{ stats.antigravity_usage?.gemini3 || 0 }} <span class="text-sm opacity-50">/ {{ stats.antigravity_usage?.limits?.gemini3 || 200 }}</span>
+              </div>
+              <button @click="currentTab = 'antigravity'" class="self-start px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition-all border border-white/10">
+                上传凭证
+              </button>
+            </div>
+            <div class="h-24 w-32 flex items-center justify-center">
+              <GaugeChart
+                :current="stats.antigravity_usage?.gemini3 || 0"
+                :max="stats.antigravity_usage?.limits?.gemini3 || 200"
+                progressColor="#22d3ee"
+                textColor="transparent"
+              />
+            </div>
           </div>
         </div>
 
