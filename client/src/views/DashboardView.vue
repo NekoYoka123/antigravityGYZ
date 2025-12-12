@@ -33,6 +33,10 @@
           <span class="text-2xl">🏠</span>
           <span class="hidden lg:block">概览</span>
         </button>
+        <button @click="currentTab = 'antigravity'" :class="antigravityTabClass">
+          <span class="text-2xl">🚀</span>
+          <span class="hidden lg:block">反重力</span>
+        </button>
         <button @click="currentTab = 'upload'" :class="tabClass('upload')">
           <span class="text-2xl">🎁</span>
           <span class="hidden lg:block">上传</span>
@@ -40,10 +44,6 @@
         <button @click="currentTab = 'keys'" :class="tabClass('keys')">
           <span class="text-2xl">🔑</span>
           <span class="hidden lg:block">密钥</span>
-        </button>
-        <button @click="currentTab = 'antigravity'" :class="antigravityTabClass">
-          <span class="text-2xl">🚀</span>
-          <span class="hidden lg:block">反重力</span>
         </button>
       </nav>
 
@@ -553,6 +553,10 @@
         <span class="text-xl mb-1">🏠</span>
         <span class="text-[10px] font-bold">概览</span>
       </button>
+      <button @click="currentTab = 'antigravity'" :class="mobileAntigravityClass">
+        <span class="text-xl mb-1">🚀</span>
+        <span class="text-[10px] font-bold">反重力</span>
+      </button>
       <button @click="currentTab = 'upload'" :class="mobileTabClass('upload')">
         <span class="text-xl mb-1">🎁</span>
         <span class="text-[10px] font-bold">上传</span>
@@ -560,10 +564,6 @@
       <button @click="currentTab = 'keys'" :class="mobileTabClass('keys')">
         <span class="text-xl mb-1">🔑</span>
         <span class="text-[10px] font-bold">密钥</span>
-      </button>
-      <button @click="currentTab = 'antigravity'" :class="mobileAntigravityClass">
-        <span class="text-xl mb-1">🚀</span>
-        <span class="text-[10px] font-bold">反重力</span>
       </button>
     </div>
     <!-- Change Password Modal -->
