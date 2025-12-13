@@ -161,7 +161,7 @@ onMounted(fetchUsers);
                     </div>
                     <div>
                         <div class="font-bold text-gray-800 flex items-center gap-2">
-                            {{ user.email }}
+                            {{ user.username || user.discordUsername || user.email }}
                         </div>
                         <div class="text-xs text-gray-400 font-mono mt-0.5">ID: {{ user.id }} • {{ new Date(user.created_at).toLocaleDateString() }}</div>
                     </div>
@@ -243,7 +243,7 @@ onMounted(fetchUsers);
               {{ user.discordUsername || '未绑定' }}
             </td>
             <td class="p-6 text-center font-bold text-gray-800">
-              {{ user.email }}
+              {{ user.username || user.discordUsername || user.email }}
             </td>
 
             <!-- Actions -->
