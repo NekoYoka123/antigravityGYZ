@@ -126,11 +126,11 @@
                 <div class="text-xs text-purple-300/70">#{{ t.id }}</div>
                 <div class="text-sm text-white">{{ t.email || '未知邮箱' }}</div>
                 <div class="text-xs">
-                  <span v-if="t.status==='ACTIVE'" class="px-2 py-1 bg-green-500/20 text-green-400 rounded-full font-bold">ACTIVE</span>
-                  <span v-else-if="t.status==='COOLING'" class="px-2 py-1 bg-amber-500/20 text-amber-400 rounded-full font-bold">COOLING</span>
-                  <span v-else class="px-2 py-1 bg-gray-500/20 text-gray-400 rounded-full font-bold">DEAD</span>
+                  <span v-if="t.status==='ACTIVE'" class="px-2 py-1 bg-green-500/20 text-green-400 rounded-full font-bold">活跃</span>
+                  <span v-else-if="t.status==='COOLING'" class="px-2 py-1 bg-amber-500/20 text-amber-400 rounded-full font-bold">冷却中</span>
+                  <span v-else class="px-2 py-1 bg-gray-500/20 text-gray-400 rounded-full font-bold">失效</span>
                   <span class="ml-2 px-2 py-1" :class="t.is_enabled ? 'bg-emerald-500/20 text-emerald-300 rounded-full' : 'bg-gray-500/20 text-gray-300 rounded-full'">
-                    {{ t.is_enabled ? 'Enabled' : 'Disabled' }}
+                    {{ t.is_enabled ? '已启用' : '已禁用' }}
                   </span>
                 </div>
               </div>
@@ -287,12 +287,12 @@
                   <td class="px-4 md:px-6 py-3 md:py-4 hidden md:table-cell">
                     <div class="flex items-center gap-2">
                       <span v-if="token.is_enabled" class="px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-xs font-bold inline-flex items-center gap-1">
-                        <span class="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span> Enabled
+                        <span class="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span> 已启用
                       </span>
-                      <span v-else class="px-3 py-1 bg-gray-500/20 text-gray-400 rounded-full text-xs font-bold">禁用</span>
-                      <span v-if="token.status==='ACTIVE'" class="px-3 py-1 bg-emerald-500/20 text-emerald-300 rounded-full text-xs font-bold">ACTIVE</span>
-                      <span v-else-if="token.status==='COOLING'" class="px-3 py-1 bg-amber-500/20 text-amber-300 rounded-full text-xs font-bold">COOLING</span>
-                      <span v-else class="px-3 py-1 bg-gray-500/20 text-gray-300 rounded-full text-xs font-bold">DEAD</span>
+                      <span v-else class="px-3 py-1 bg-gray-500/20 text-gray-400 rounded-full text-xs font-bold">已禁用</span>
+                      <span v-if="token.status==='ACTIVE'" class="px-3 py-1 bg-emerald-500/20 text-emerald-300 rounded-full text-xs font-bold">活跃</span>
+                      <span v-else-if="token.status==='COOLING'" class="px-3 py-1 bg-amber-500/20 text-amber-300 rounded-full text-xs font-bold">冷却中</span>
+                      <span v-else class="px-3 py-1 bg-gray-500/20 text-gray-300 rounded-full text-xs font-bold">失效</span>
                     </div>
                   </td>
                   <td class="px-4 md:px-6 py-3 md:py-4 text-right">
