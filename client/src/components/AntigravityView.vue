@@ -27,19 +27,28 @@
       <!-- Usage Dashboard removed -->
 
       <!-- OAuth Card -->
-      <div class="glow-card bg-white/5 backdrop-blur-xl border border-purple-500/30 rounded-2xl md:rounded-3xl p-5 md:p-8 hover:border-purple-400/50 transition-all duration-500 group">
-        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
-          <div>
-            <h3 class="text-xl md:text-2xl font-black text-white flex items-center gap-2 md:gap-3">
-              <span class="text-2xl md:text-3xl animate-bounce-slow">&#128274;</span>
-              <span class="neon-text">获取授权凭证</span>
-            </h3>
-            <p class="text-purple-300/60 text-xs md:text-sm mt-1 md:mt-2">通过 Google OAuth 授权获取反重力渠道访问凭证</p>
+      <div class="glow-card bg-white/5 backdrop-blur-xl border border-purple-500/30 rounded-2xl md:rounded-3xl overflow-hidden transition-all duration-500 group">
+        <div
+          @click="isOAuthExpanded = !isOAuthExpanded"
+          class="p-5 md:p-8 flex items-center justify-between cursor-pointer hover:bg-white/5 transition-colors"
+        >
+          <div class="flex flex-col md:flex-row md:items-center gap-4">
+            <div>
+              <h3 class="text-xl md:text-2xl font-black text-white flex items-center gap-2 md:gap-3">
+                <span class="text-2xl md:text-3xl animate-bounce-slow">&#128274;</span>
+                <span class="neon-text">获取授权凭证</span>
+              </h3>
+              <p class="text-purple-300/60 text-xs md:text-sm mt-1 md:mt-2">通过 Google OAuth 授权获取反重力渠道访问凭证</p>
+            </div>
           </div>
+          <button class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center text-white transition-transform duration-300"
+            :class="{ 'rotate-180': isOAuthExpanded }">
+            &#9660;
+          </button>
         </div>
 
         <!-- Steps -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+        <div v-show="isOAuthExpanded" class="px-5 md:px-8 pb-5 md:pb-8 grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 border-t border-purple-500/20 pt-6">
           <!-- Step 1 -->
           <div class="step-card bg-gradient-to-br from-purple-900/50 to-indigo-900/50 border border-purple-500/20 rounded-xl md:rounded-2xl p-4 md:p-6">
             <div class="flex items-center gap-2 md:gap-3 mb-3 md:mb-4">
@@ -94,12 +103,12 @@
               </span>
             </button>
           </div>
-        </div>
 
-        <!-- Message -->
-        <div v-if="message" class="mt-4 md:mt-6 p-3 md:p-4 rounded-xl text-center text-sm md:text-base font-bold animate-fade-in"
-             :class="messageType === 'success' ? 'bg-green-500/20 text-green-300 border border-green-500/30' : 'bg-red-500/20 text-red-300 border border-red-500/30'">
-          {{ message }}
+          <!-- Message -->
+          <div v-if="message" class="col-span-1 md:col-span-2 mt-2 p-3 md:p-4 rounded-xl text-center text-sm md:text-base font-bold animate-fade-in"
+               :class="messageType === 'success' ? 'bg-green-500/20 text-green-300 border border-green-500/30' : 'bg-red-500/20 text-red-300 border border-red-500/30'">
+            {{ message }}
+          </div>
         </div>
       </div>
 
@@ -336,6 +345,7 @@ const copied = ref(false);
 const message = ref('');
 const messageType = ref<'success' | 'error'>('success');
 const skipValidation = ref(false);
+const isOAuthExpanded = ref(true);
 
 const myTokens = ref<any[]>([]);
 const loadingMyTokens = ref(false);
@@ -449,6 +459,10 @@ const fetchMyTokens = async () => {
     const res = await api.get('/antigravity/my-tokens', { params: { page: page.value, limit: limit.value } });
     myTokens.value = res.data.tokens || [];
     total.value = res.data.total || 0;
+    // Auto-collapse if user has tokens
+    if (myTokens.value.length > 0) {
+        isOAuthExpanded.value = false;
+    }
   } catch (e) {
   } finally {
     loadingMyTokens.value = false;
