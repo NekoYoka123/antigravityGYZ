@@ -75,8 +75,11 @@
               <span class="w-7 h-7 md:w-8 md:h-8 rounded-full bg-cyan-500 flex items-center justify-center text-white font-bold text-sm md:text-base pulse-ring-cyan">2</span>
               <span class="text-white font-bold text-sm md:text-base">提交授权码</span>
             </div>
-            <input v-model="authCode" type="text" placeholder="粘贴授权码..."
-              class="w-full px-4 py-3 md:py-4 rounded-xl bg-black/40 border border-cyan-500/30 text-white placeholder-white/30 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 outline-none transition-all text-sm md:text-base" />
+            <div class="mb-2 text-xs text-cyan-200/80 leading-relaxed break-words">
+              请在完成Google授权后, 从打开的显示无法访问的页面的地址栏中完整复制整个网址并粘贴到下方。
+            </div>
+            <textarea v-model="authCode" rows="3" placeholder="粘贴完整网址..."
+              class="w-full px-4 py-3 rounded-xl bg-black/40 border border-cyan-500/30 text-white placeholder-white/30 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 outline-none transition-all text-xs resize-none"></textarea>
             <div class="mt-2 flex items-center gap-2 text-white/70 text-xs md:text-sm">
               <input type="checkbox" id="skipValidation" v-model="skipValidation" class="rounded border-cyan-500/30 bg-black/40 text-cyan-500 focus:ring-cyan-500/50">
               <label for="skipValidation" class="cursor-pointer hover:text-cyan-300 transition-colors">如果是家庭共享账号，请勾选此项以跳过 Project ID 验证</label>
