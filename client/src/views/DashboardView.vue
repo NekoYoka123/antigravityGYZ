@@ -165,7 +165,7 @@
           :initial="{ opacity: 0, y: 50 }"
           :enter="{ opacity: 1, y: 0, transition: { type: 'spring', stiffness: 200, delay: 350 } }"
           :hover="{ scale: 1.01 }"
-          class="col-span-1 md:col-span-2 lg:col-span-4 row-span-1 rounded-[30px] overflow-hidden shadow-xl flex flex-col md:flex-row border border-white/20"
+          class="col-span-1 md:col-span-2 lg:col-span-4 row-span-2 md:row-span-1 rounded-[30px] overflow-hidden shadow-xl flex flex-col md:flex-row border border-white/20"
         >
           <!-- Left: Claude -->
           <div class="flex-1 bg-gradient-to-br from-purple-900/40 to-fuchsia-900/40 p-4 text-purple-200 flex flex-col relative border-b md:border-b-0 md:border-r border-white/10">
