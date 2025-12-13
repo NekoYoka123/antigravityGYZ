@@ -20,9 +20,7 @@
         </div>
 
         <!-- Scrollable Body -->
-        <div class="p-8 overflow-y-auto custom-scrollbar flex-1 text-base leading-relaxed whitespace-pre-line text-gray-700">
-            {{ content }}
-        </div>
+        <div class="p-8 overflow-y-auto custom-scrollbar flex-1 text-base leading-relaxed text-gray-700 markdown-body" v-html="renderedContent"></div>
 
         <!-- Footer -->
         <div class="px-8 py-6 border-t border-gray-100 bg-gray-50 flex justify-end">
@@ -43,13 +41,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted, computed } from 'vue';
+import MarkdownIt from 'markdown-it';
+
+const md = new MarkdownIt({
+    html: false,
+    breaks: true,
+    linkify: true
+});
 
 const props = defineProps<{
     show: boolean;
     content: string;
     forceRead: boolean; // If true, enables the timer
 }>();
+
+const renderedContent = computed(() => md.render(props.content || ''));
 
 const emit = defineEmits(['close']);
 
@@ -93,3 +100,17 @@ onUnmounted(() => {
     if (timer) clearInterval(timer);
 });
 </script>
+
+<style>
+.markdown-body h1 { font-size: 1.5em; font-weight: bold; margin-bottom: 0.5em; }
+.markdown-body h2 { font-size: 1.25em; font-weight: bold; margin-bottom: 0.5em; margin-top: 1em; }
+.markdown-body p { margin-bottom: 1em; }
+.markdown-body ul { list-style-type: disc; padding-left: 1.5em; margin-bottom: 1em; }
+.markdown-body ol { list-style-type: decimal; padding-left: 1.5em; margin-bottom: 1em; }
+.markdown-body a { color: #4f46e5; text-decoration: underline; }
+.markdown-body blockquote { border-left: 4px solid #e5e7eb; padding-left: 1em; color: #6b7280; margin-bottom: 1em; }
+.markdown-body code { background-color: #f3f4f6; padding: 0.2em 0.4em; rounded: 0.25em; font-family: monospace; font-size: 0.9em; }
+.markdown-body pre { background-color: #f3f4f6; padding: 1em; rounded: 0.5em; overflow-x: auto; margin-bottom: 1em; }
+.markdown-body pre code { background-color: transparent; padding: 0; }
+.markdown-body img { max-width: 100%; height: auto; border-radius: 0.5em; margin: 1em 0; }
+</style>

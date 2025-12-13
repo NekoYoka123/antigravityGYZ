@@ -22,7 +22,7 @@
             <div class="absolute -bottom-1 -right-1 bg-green-500 w-4 h-4 rounded-full border-2 border-black"></div>
         </div>
         <div class="hidden lg:block overflow-hidden w-full">
-            <div class="font-bold truncate text-lg">{{ userInfo.email?.split('@')[0] }}</div>
+            <div class="font-bold truncate text-lg">{{ userInfo.username || userInfo.email?.split('@')[0] }}</div>
             <div class="text-xs text-white/40 truncate">{{ userInfo.email }}</div>
             <button @click="showChangePwModal = true" class="text-[10px] mt-2 bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-white/60 transition">修改密码</button>
         </div>
@@ -126,7 +126,7 @@
         </div>
 
         <!-- 公告（中间卡片） -->
-        <div 
+        <div
             @click="openAnnouncementPreview"
             v-motion
             :initial="{ opacity: 0, y: 50 }"
@@ -134,8 +134,12 @@
             :hover="{ scale: 1.01 }"
             class="col-span-1 row-span-2 bg-white/90 rounded-[30px] p-5 text-gray-800 flex flex-col shadow-xl cursor-pointer hover:bg-white transition-colors group"
         >
-           <div class="flex-1 overflow-y-auto pr-2 space-y-3 text-xs">
-             <div v-if="announcementData.content" class="whitespace-pre-line">{{ announcementData.content }}</div>
+           <div class="flex-1 overflow-y-auto pr-2 space-y-3 text-xs markdown-preview">
+             <div v-if="announcementData.content" v-html="renderedAnnouncementPreview"></div>
+             <div v-else class="h-full flex flex-col items-center justify-center text-gray-400 opacity-50">
+                <span class="text-4xl mb-2">💤</span>
+                <span>暂无公告</span>
+             </div>
            </div>
         </div>
 
@@ -602,7 +606,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { api } from '@/utils/api'; 
+import { api } from '@/utils/api';
+import MarkdownIt from 'markdown-it';
 import AnimatedBackground from '../components/AnimatedBackground.vue';
 import AdminCredentialTable from '../components/AdminCredentialTable.vue';
 import AdminUserTable from '../components/AdminUserTable.vue';
@@ -768,6 +773,11 @@ const visibleLeaderboard = computed(() => {
     if (!Array.isArray(list)) return [];
     const start = (leaderboardPage.value - 1) * 5;
     return list.slice(start, start + 5);
+});
+
+const md = new MarkdownIt({ html: false, breaks: true, linkify: true });
+const renderedAnnouncementPreview = computed(() => {
+    return md.render(announcementData.value.content || '');
 });
 
 // ... computed properties ...
@@ -1040,6 +1050,12 @@ onMounted(() => {
 .pb-safe {
   padding-bottom: 20px;
 }
+
+/* Markdown Preview Styles */
+.markdown-preview p { margin-bottom: 0.5em; }
+.markdown-preview ul, .markdown-preview ol { padding-left: 1em; margin-bottom: 0.5em; }
+.markdown-preview a { color: #4f46e5; text-decoration: underline; }
+.markdown-preview h1, .markdown-preview h2, .markdown-preview h3 { font-weight: bold; margin-bottom: 0.2em; }
 
 /* 自定义滚动条 */
 .custom-scrollbar::-webkit-scrollbar {
