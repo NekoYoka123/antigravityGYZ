@@ -260,18 +260,27 @@
             <h3 class="text-lg md:text-xl font-black text-white flex items-center gap-2">
               <span class="text-xl md:text-2xl">&#128203;</span> Token List
             </h3>
-            <button @click="fetchTokens" class="px-4 py-2 bg-purple-600/50 hover:bg-purple-600/70 rounded-xl text-white text-xs md:text-sm font-bold transition-all flex items-center justify-center gap-2">
-              <span :class="{ 'animate-spin': loadingTokens }">&#8635;</span> 刷新
-            </button>
+            <div class="flex items-center gap-2">
+                <div class="text-xs text-purple-300/70">第 {{ tokenPage }} / {{ tokenPageCount }} 页</div>
+                <button @click="prevTokenPage" :disabled="tokenPage<=1" class="px-2 py-1 bg-purple-600/30 hover:bg-purple-600/50 disabled:opacity-50 rounded-lg text-white text-xs font-bold"><</button>
+                <button @click="nextTokenPage" :disabled="tokenPage>=tokenPageCount" class="px-2 py-1 bg-purple-600/30 hover:bg-purple-600/50 disabled:opacity-50 rounded-lg text-white text-xs font-bold">></button>
+                <button @click="fetchTokens" class="px-4 py-2 bg-purple-600/50 hover:bg-purple-600/70 rounded-xl text-white text-xs md:text-sm font-bold transition-all flex items-center justify-center gap-2">
+                <span :class="{ 'animate-spin': loadingTokens }">&#8635;</span> 刷新
+                </button>
+            </div>
           </div>
 
           <div class="overflow-x-auto">
             <table class="w-full">
               <thead>
                 <tr class="text-left border-b border-purple-500/20 bg-purple-900/20">
-                  <th class="px-4 md:px-6 py-3 md:py-4 text-[10px] md:text-xs font-black text-purple-300/70 uppercase tracking-wider">ID</th>
+                  <th @click="handleSort('id')" class="px-4 md:px-6 py-3 md:py-4 text-[10px] md:text-xs font-black text-purple-300/70 uppercase tracking-wider cursor-pointer hover:text-purple-200 select-none">
+                    ID <span v-if="tokenSortBy === 'id'">{{ tokenOrder === 'asc' ? '↑' : '↓' }}</span>
+                  </th>
                   <th class="px-4 md:px-6 py-3 md:py-4 text-[10px] md:text-xs font-black text-purple-300/70 uppercase tracking-wider">邮箱</th>
-                  <th class="px-4 md:px-6 py-3 md:py-4 text-[10px] md:text-xs font-black text-purple-300/70 uppercase tracking-wider">次数</th>
+                  <th @click="handleSort('total_used')" class="px-4 md:px-6 py-3 md:py-4 text-[10px] md:text-xs font-black text-purple-300/70 uppercase tracking-wider cursor-pointer hover:text-purple-200 select-none">
+                    次数 <span v-if="tokenSortBy === 'total_used'">{{ tokenOrder === 'asc' ? '↑' : '↓' }}</span>
+                  </th>
                   <th class="px-4 md:px-6 py-3 md:py-4 text-[10px] md:text-xs font-black text-purple-300/70 uppercase tracking-wider hidden md:table-cell">状态</th>
                   <th class="px-4 md:px-6 py-3 md:py-4 text-[10px] md:text-xs font-black text-purple-300/70 uppercase tracking-wider text-right">操作</th>
                 </tr>
@@ -355,6 +364,13 @@ const total = ref(0);
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / limit.value)));
 
 const tokens = ref<any[]>([]);
+const tokenPage = ref(1);
+const tokenLimit = ref(10);
+const tokenTotal = ref(0);
+const tokenPageCount = computed(() => Math.max(1, Math.ceil(tokenTotal.value / tokenLimit.value)));
+const tokenSortBy = ref('id');
+const tokenOrder = ref<'asc' | 'desc'>('asc');
+
 const stats = ref({ total: 0, active: 0, inactive: 0, total_capacity: 0, personal_max_usage: 0 });
 const agOverview = ref<any | null>(null);
 const loadingTokens = ref(false);
@@ -498,14 +514,35 @@ const fetchTokens = async () => {
   if (!isAdmin.value) return;
   loadingTokens.value = true;
   try {
-    const res = await api.get('/antigravity/tokens');
+    const res = await api.get('/antigravity/tokens', {
+        params: {
+            page: tokenPage.value,
+            limit: tokenLimit.value,
+            sort_by: tokenSortBy.value,
+            order: tokenOrder.value
+        }
+    });
     tokens.value = res.data.tokens || [];
+    tokenTotal.value = res.data.meta?.total || 0;
     stats.value = res.data.stats || { total: 0, active: 0, inactive: 0 };
   } catch (e) {
     console.error('Failed to fetch tokens', e);
   } finally {
     loadingTokens.value = false;
   }
+};
+
+const prevTokenPage = () => { if (tokenPage.value > 1) { tokenPage.value -= 1; fetchTokens(); } };
+const nextTokenPage = () => { if (tokenPage.value < tokenPageCount.value) { tokenPage.value += 1; fetchTokens(); } };
+
+const handleSort = (field: string) => {
+    if (tokenSortBy.value === field) {
+        tokenOrder.value = tokenOrder.value === 'asc' ? 'desc' : 'asc';
+    } else {
+        tokenSortBy.value = field;
+        tokenOrder.value = 'desc'; // Default to desc for new field (usually usage)
+    }
+    fetchTokens();
 };
 
 const fetchAgOverview = async () => {

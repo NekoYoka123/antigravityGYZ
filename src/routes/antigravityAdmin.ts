@@ -206,7 +206,14 @@ export default async function antigravityAdminRoutes(app: FastifyInstance) {
     app.get('/tokens', async (req, reply) => {
         if (!await verifyAdmin(req, reply)) return;
 
-        const tokens = await antigravityTokenManager.getTokenList();
+        const query = req.query as any;
+        const page = Math.max(1, parseInt(query.page) || 1);
+        const limit = Math.min(Math.max(1, parseInt(query.limit) || 10), 100);
+        const sortBy = query.sort_by || 'id';
+        const order = query.order === 'desc' ? 'desc' : 'asc';
+
+        const { tokens, total } = await antigravityTokenManager.getTokenList(page, limit, sortBy, order);
+        
         const baseStats = await antigravityTokenManager.getStats();
         const setting = await prisma.systemSetting.findUnique({ where: { key: 'SYSTEM_CONFIG' } });
         let personalMax = 0;
@@ -218,7 +225,16 @@ export default async function antigravityAdminRoutes(app: FastifyInstance) {
         const totalCapacity = personalMax > 0 ? personalMax * baseStats.active : 0;
         const stats = { ...baseStats, inactive, personal_max_usage: personalMax, total_capacity: totalCapacity };
 
-        return { tokens, stats };
+        return {
+            tokens,
+            stats,
+            meta: {
+                total,
+                page,
+                limit,
+                total_pages: Math.ceil(total / limit)
+            }
+        };
     });
 
     // 添加 Token (仅管理员)
@@ -513,7 +529,7 @@ export default async function antigravityAdminRoutes(app: FastifyInstance) {
     app.post('/refresh-all', async (req, reply) => {
         if (!await verifyAdmin(req, reply)) return;
 
-        const tokens = await antigravityTokenManager.getTokenList();
+        const tokens = await antigravityTokenManager.getAllTokens();
         const results: any[] = [];
 
         for (const t of tokens) {

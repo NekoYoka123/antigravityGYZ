@@ -297,14 +297,48 @@ export class AntigravityTokenManager {
     }
 
     /**
-     * Get Token list
+     * Get all tokens (internal use)
      */
-    async getTokenList(): Promise<any[]> {
+    async getAllTokens(): Promise<any[]> {
         const tokens = await prisma.antigravityToken.findMany({
             orderBy: { id: 'asc' }
         });
-
         return tokens.map(t => ({
+            id: t.id,
+            refresh_token: t.refresh_token,
+            is_enabled: t.is_enabled
+        }));
+    }
+
+    /**
+     * Get Token list with pagination and sorting
+     */
+    async getTokenList(
+        page: number = 1,
+        limit: number = 10,
+        sortBy: string = 'id',
+        order: 'asc' | 'desc' = 'asc'
+    ): Promise<{ tokens: any[], total: number }> {
+        const skip = (page - 1) * limit;
+        const orderBy: any = {};
+        
+        // Handle sorting
+        if (sortBy === 'total_used') {
+            orderBy.total_used = order;
+        } else {
+            orderBy.id = order;
+        }
+
+        const [total, tokens] = await prisma.$transaction([
+            prisma.antigravityToken.count(),
+            prisma.antigravityToken.findMany({
+                skip,
+                take: limit,
+                orderBy
+            })
+        ]);
+
+        const mappedTokens = tokens.map(t => ({
             id: t.id,
             access_token_suffix: t.access_token ? '...' + t.access_token.slice(-8) : 'N/A',
             refresh_token: t.refresh_token,
@@ -312,13 +346,15 @@ export class AntigravityTokenManager {
             email: t.email,
             is_enabled: t.is_enabled,
             status: t.status,
-            total_used: t['total_used' as keyof typeof t] as any,
+            total_used: t.total_used,
             expires_at: t.timestamp && t.expires_in
                 ? new Date(Number(t.timestamp) + t.expires_in * 1000).toISOString()
                 : null,
             last_used_at: t.last_used_at,
             created_at: t.created_at
         }));
+
+        return { tokens: mappedTokens, total };
     }
 
     /**
