@@ -155,9 +155,18 @@ export default async function authRoutes(fastify: FastifyInstance) {
             }
             const rand = crypto.randomBytes(24).toString('hex');
             const hashed = await bcrypt.hash(rand, 10);
+            
+            let finalUsername = du.username || `user_${discordIdStr}`;
+            // Check for username collision
+            const nameExists = await prisma.user.findUnique({ where: { username: finalUsername } });
+            if (nameExists) {
+                finalUsername = `${finalUsername}_${discordIdStr.slice(-4)}`;
+            }
+
             user = await prisma.user.create({
               data: ({
                 email: discordEmail,
+                username: finalUsername,
                 password: hashed,
                 daily_limit: defaultQuota,
                 discordId: discordIdStr,
