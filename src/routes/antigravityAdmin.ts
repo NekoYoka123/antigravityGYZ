@@ -115,13 +115,32 @@ export default async function antigravityAdminRoutes(app: FastifyInstance) {
     app.post('/config', async (req, reply) => {
         if (!await verifyAdmin(req, reply)) return;
 
-        const { claude_limit, gemini3_limit } = req.body as any;
+        const { 
+            claude_limit, gemini3_limit,
+            increment_per_token_claude, increment_per_token_gemini3,
+            use_token_quota, claude_token_quota, gemini3_token_quota,
+            increment_token_per_token_claude, increment_token_per_token_gemini3
+        } = req.body as any;
 
-        if (typeof claude_limit !== 'number' || typeof gemini3_limit !== 'number') {
+        // Validation (basic)
+        if (
+            (claude_limit !== undefined && typeof claude_limit !== 'number') ||
+            (gemini3_limit !== undefined && typeof gemini3_limit !== 'number')
+        ) {
             return reply.code(400).send({ error: 'Invalid limits. Must be numbers.' });
         }
 
-        const config = { claude_limit, gemini3_limit };
+        const config = { 
+            claude_limit, 
+            gemini3_limit,
+            increment_per_token_claude: typeof increment_per_token_claude === 'number' ? increment_per_token_claude : 0,
+            increment_per_token_gemini3: typeof increment_per_token_gemini3 === 'number' ? increment_per_token_gemini3 : 0,
+            use_token_quota: !!use_token_quota,
+            claude_token_quota: typeof claude_token_quota === 'number' ? claude_token_quota : 100000,
+            gemini3_token_quota: typeof gemini3_token_quota === 'number' ? gemini3_token_quota : 200000,
+            increment_token_per_token_claude: typeof increment_token_per_token_claude === 'number' ? increment_token_per_token_claude : 0,
+            increment_token_per_token_gemini3: typeof increment_token_per_token_gemini3 === 'number' ? increment_token_per_token_gemini3 : 0
+        };
         
         await prisma.systemSetting.upsert({
             where: { key: 'ANTIGRAVITY_CONFIG' },
@@ -130,7 +149,6 @@ export default async function antigravityAdminRoutes(app: FastifyInstance) {
         });
 
         // Audit Log (Optional but good practice)
-        // Note: AuditLog model is not yet created, so we skip or use console for now
         console.log(`[Admin] Antigravity config updated:`, config);
 
         return { success: true, config };
@@ -142,10 +160,17 @@ export default async function antigravityAdminRoutes(app: FastifyInstance) {
         
         const todayStr = new Date().toISOString().split('T')[0];
         
-        // 1. Get Global Usage from Redis
-        const globalUsage = await redis.hgetall(`AG_GLOBAL:${todayStr}`);
-        const claudeUsed = parseInt(globalUsage?.claude || '0', 10);
-        const gemini3Used = parseInt(globalUsage?.gemini3 || '0', 10);
+        // 1. Get Global Usage from Redis (Dual Counters)
+        const requestsUsage = await redis.hgetall(`AG_GLOBAL:requests:${todayStr}`);
+        const tokensUsage = await redis.hgetall(`AG_GLOBAL:tokens:${todayStr}`);
+        // Fallback for legacy keys (if new keys empty, try old)
+        const legacyUsage = await redis.hgetall(`AG_GLOBAL:${todayStr}`);
+
+        const claudeRequests = parseInt(requestsUsage?.claude || legacyUsage?.claude || '0', 10);
+        const gemini3Requests = parseInt(requestsUsage?.gemini3 || legacyUsage?.gemini3 || '0', 10);
+        
+        const claudeTokens = parseInt(tokensUsage?.claude || '0', 10);
+        const gemini3Tokens = parseInt(tokensUsage?.gemini3 || '0', 10);
         
         // 2. Get Token Count (Active)
         const activeTokens = await prisma.antigravityToken.count({
@@ -154,26 +179,39 @@ export default async function antigravityAdminRoutes(app: FastifyInstance) {
         
         // 3. Get Config for Limits
         const setting = await prisma.systemSetting.findUnique({ where: { key: 'ANTIGRAVITY_CONFIG' } });
-        let config = { claude_limit: 100, gemini3_limit: 200 };
+        let config = { claude_limit: 100, gemini3_limit: 200, claude_token_quota: 100000, gemini3_token_quota: 200000 };
         if (setting) {
             try { config = { ...config, ...JSON.parse(setting.value) }; } catch(e){}
         }
         
         // 4. Calculate "Capacity" (Token Count * User Limit)
-        // Interpretation: Total possible usage if we consider token count as a multiplier of service capability
-        // OR simply reflecting the prompt's request: "有效凭证数 × 每个用户被允许使用的次数"
-        const claudeCapacity = activeTokens * config.claude_limit;
-        const gemini3Capacity = activeTokens * config.gemini3_limit;
+        const claudeCapacityRequests = activeTokens * config.claude_limit;
+        const gemini3CapacityRequests = activeTokens * config.gemini3_limit;
+        
+        const claudeCapacityTokens = activeTokens * (config.claude_token_quota || 100000);
+        const gemini3CapacityTokens = activeTokens * (config.gemini3_token_quota || 200000);
         
         return {
             date: todayStr,
             usage: {
-                claude: claudeUsed,
-                gemini3: gemini3Used
+                requests: {
+                    claude: claudeRequests,
+                    gemini3: gemini3Requests
+                },
+                tokens: {
+                    claude: claudeTokens,
+                    gemini3: gemini3Tokens
+                }
             },
             capacity: {
-                claude: claudeCapacity,
-                gemini3: gemini3Capacity
+                requests: {
+                    claude: claudeCapacityRequests,
+                    gemini3: gemini3CapacityRequests
+                },
+                tokens: {
+                    claude: claudeCapacityTokens,
+                    gemini3: gemini3CapacityTokens
+                }
             },
             meta: {
                 active_tokens: activeTokens,
@@ -189,15 +227,28 @@ export default async function antigravityAdminRoutes(app: FastifyInstance) {
         const { userId } = req.params as any;
         const todayStr = new Date().toISOString().split('T')[0];
         
-        const claudeUsed = await redis.get(`USAGE:${todayStr}:${userId}:antigravity:claude`);
-        const gemini3Used = await redis.get(`USAGE:${todayStr}:${userId}:antigravity:gemini3`);
+        // Dual keys
+        const claudeRequests = await redis.get(`USAGE:requests:${todayStr}:${userId}:antigravity:claude`);
+        const gemini3Requests = await redis.get(`USAGE:requests:${todayStr}:${userId}:antigravity:gemini3`);
+        const claudeTokens = await redis.get(`USAGE:tokens:${todayStr}:${userId}:antigravity:claude`);
+        const gemini3Tokens = await redis.get(`USAGE:tokens:${todayStr}:${userId}:antigravity:gemini3`);
         
+        // Legacy fallback
+        const claudeLegacy = await redis.get(`USAGE:${todayStr}:${userId}:antigravity:claude`);
+        const gemini3Legacy = await redis.get(`USAGE:${todayStr}:${userId}:antigravity:gemini3`);
+
         return {
             date: todayStr,
             userId: parseInt(userId),
             usage: {
-                claude: parseInt(claudeUsed || '0', 10),
-                gemini3: parseInt(gemini3Used || '0', 10)
+                requests: {
+                    claude: parseInt(claudeRequests || claudeLegacy || '0', 10),
+                    gemini3: parseInt(gemini3Requests || gemini3Legacy || '0', 10)
+                },
+                tokens: {
+                    claude: parseInt(claudeTokens || '0', 10),
+                    gemini3: parseInt(gemini3Tokens || '0', 10)
+                }
             }
         };
     });
@@ -248,36 +299,62 @@ export default async function antigravityAdminRoutes(app: FastifyInstance) {
         }
 
         try {
+            // 验证账号是否有 Antigravity 权限 (通过实际调用 gemini-2.5-flash)
             let projectId: string | undefined = body.projectId;
             try {
-                const projectRes = await axios.post(
-                    'https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:loadCodeAssist',
-                    { metadata: { ideType: 'ANTIGRAVITY' } },
-                    {
-                        headers: {
-                            'Host': 'daily-cloudcode-pa.sandbox.googleapis.com',
-                            'Authorization': `Bearer ${body.access_token}`,
-                            'Content-Type': 'application/json',
-                            'User-Agent': 'antigravity/1.11.9 windows/amd64'
-                        }
+                // 1. 如果没有 projectId，尝试获取 (可选，如果用户没填)
+                if (!projectId) {
+                    try {
+                        const projectRes = await axios.post(
+                            'https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:loadCodeAssist',
+                            { metadata: { ideType: 'ANTIGRAVITY' } },
+                            {
+                                headers: {
+                                    'Host': 'daily-cloudcode-pa.sandbox.googleapis.com',
+                                    'Authorization': `Bearer ${body.access_token}`,
+                                    'Content-Type': 'application/json',
+                                    'User-Agent': 'antigravity/1.11.9 windows/amd64'
+                                }
+                            }
+                        );
+                        projectId = projectRes.data?.cloudaicompanionProject;
+                    } catch (e) {
+                        console.warn('[Antigravity] Failed to fetch projectId via loadCodeAssist, proceeding if projectId provided manually or assuming valid later.');
                     }
-                );
-                projectId = projectRes.data?.cloudaicompanionProject || projectId;
+                }
+
+                // 2. 如果还是没有 projectId，报错
+                if (!projectId) {
+                    return reply.code(400).send({ error: '无法获取 projectId，请手动在请求中提供 projectId' });
+                }
+
+                // 3. 使用 CredentialService 进行实际生成测试
+                // 借用 CredentialService 的 verifyCloudCodeAccess 方法
+                // 注意：CredentialService 需要实例化
+                const { CredentialService } = require('../services/CredentialService');
+                const credentialService = new CredentialService();
+                
+                // 验证 gemini-2.5-flash (基础反重力能力)
+                const isValid = await credentialService.verifyCloudCodeAccess(body.access_token, projectId, 'gemini-2.5-flash');
+                
+                if (!isValid) {
+                    // verifyCloudCodeAccess returns false only on internal error, usually throws on API error
+                    // If it returned false without throwing, it means response parsing failed
+                    return reply.code(400).send({ error: '验证失败：API 返回了无效的响应格式' });
+                }
+
             } catch (e: any) {
+                console.error('[Antigravity] Token validation failed:', e.message);
                 const status = e.response?.status;
                 const err = e.response?.data?.error;
                 const message = err?.message || e.message;
-                if (status === 403) {
-                    const isNamedUser403 = err?.code === 403
-                        && err?.status === 'PERMISSION_DENIED'
-                        && typeof err?.message === 'string'
-                        && err.message.includes('You must be a named user on your organization');
-                    const outMsg = isNamedUser403
-                        ? '账号权限不足：此 Google 账号未获得 Gemini Code Assist 标准版授权，无法作为反重力凭证使用。请更换已开通权限的账号。'
-                        : '该凭证无权使用 Antigravity（403）: ' + message;
-                    console.warn('[Antigravity] Credential upload permission denied (admin /tokens):', e.response?.data || e.message);
-                    return reply.code(400).send({ error: outMsg });
+                
+                // 如果是 403，说明确实没权限调用模型
+                if (message.includes('403') || status === 403) {
+                     return reply.code(400).send({ error: '权限验证失败 (403)：该凭证无法调用 Gemini 模型。请确保账号已开通相关权限。' });
                 }
+                
+                return reply.code(400).send({ error: '验证失败: ' + message });
             }
             const token = await antigravityTokenManager.addToken({
                 access_token: body.access_token,

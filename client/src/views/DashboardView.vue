@@ -184,6 +184,9 @@
                 />
               </div>
             </div>
+            <div class="text-[10px] text-center text-purple-200/70 mt-1 font-mono">
+              单位：{{ antigravityUnitLabel }}
+            </div>
           </div>
 
           <!-- Right: Gemini -->
@@ -197,6 +200,9 @@
                   progressColor="#22d3ee"
                   textColor="text-cyan-200"
                 />
+              </div>
+              <div class="text-[10px] text-center text-cyan-200/70 mt-1 font-mono">
+                单位：{{ antigravityUnitLabel }}
               </div>
               <button @click="currentTab = 'antigravity'" class="absolute bottom-0 right-0 px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition-all border border-white/10 shadow-lg z-10">
                 上传凭证
@@ -725,7 +731,7 @@ const stats = ref({
     daily_limit: 300, 
     today_used: 0, 
     model_usage: { 'gemini-2.5-flash': 0, 'gemini-2.5-pro': 0, 'gemini-3-pro-preview': 0 },
-    antigravity_usage: { claude: 0, gemini3: 0, limits: { claude: 100, gemini3: 200 } },
+    antigravity_usage: { claude: 0, gemini3: 0, limits: { claude: 100, gemini3: 200 }, use_token_quota: false },
     contributed_active: 0, 
     contributed_v3_active: 0, 
     system_config: { quota: { contributor: 1500 } } 
@@ -780,7 +786,13 @@ const renderedAnnouncementPreview = computed(() => {
     return md.render(announcementData.value.content || '');
 });
 
-// ... computed properties ...
+const isAntigravityTokenMode = computed(() => {
+    return !!stats.value.antigravity_usage?.use_token_quota;
+});
+
+const antigravityUnitLabel = computed(() => {
+    return isAntigravityTokenMode.value ? 'Tokens' : '次';
+});
 
 const userTitle = computed(() => {
     if (stats.value.contributed_v3_active > 0) return '至臻大佬 💎';

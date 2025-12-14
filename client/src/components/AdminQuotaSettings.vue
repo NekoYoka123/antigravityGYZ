@@ -27,6 +27,13 @@ const message = ref('');
 
 const antigravityStats = ref<any>(null);
 
+const formatNumber = (num: number) => {
+  if (!num) return '0';
+  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+  if (num >= 1000) return (num / 1000).toFixed(1) + 'k';
+  return num.toString();
+};
+
 const fetchSettings = async () => {
   try {
     const [res, agRes, agStatsRes] = await Promise.all([
@@ -159,42 +166,94 @@ onMounted(fetchSettings);
             
             <div v-if="antigravityStats" class="bg-blue-50/50 rounded-xl p-3 text-xs mb-4 border border-blue-100">
                 <div class="flex justify-between items-center mb-2">
-                    <span class="text-gray-500">有效凭证数</span>
-                    <span class="font-bold text-blue-600">{{ antigravityStats.meta.active_tokens }}</span>
+                    <span class="text-gray-500">有效账号数</span>
+                    <span class="font-bold text-blue-600">{{ antigravityStats.meta.active_accounts ?? antigravityStats.meta.active_tokens }}</span>
                 </div>
                 <div class="grid grid-cols-2 gap-3">
                     <div class="space-y-1">
                         <div class="text-blue-600/70 font-bold">Claude</div>
                         <div class="flex justify-between">
                             <span class="text-gray-400">已用</span>
-                            <span class="font-mono">{{ antigravityStats.usage.claude }}</span>
+                            <span class="font-mono">{{ config.antigravity.use_token_quota ? formatNumber(antigravityStats.usage.tokens.claude) : antigravityStats.usage.requests.claude }}</span>
                         </div>
                         <div class="flex justify-between">
                             <span class="text-gray-400">容量</span>
-                            <span class="font-mono">{{ antigravityStats.capacity.claude }}</span>
+                            <span class="font-mono">{{ config.antigravity.use_token_quota ? formatNumber(antigravityStats.capacity.tokens.claude) : antigravityStats.capacity.requests.claude }}</span>
                         </div>
                     </div>
                     <div class="space-y-1">
                         <div class="text-purple-600/70 font-bold">Gemini 3</div>
                         <div class="flex justify-between">
                             <span class="text-gray-400">已用</span>
-                            <span class="font-mono">{{ antigravityStats.usage.gemini3 }}</span>
+                            <span class="font-mono">{{ config.antigravity.use_token_quota ? formatNumber(antigravityStats.usage.tokens.gemini3) : antigravityStats.usage.requests.gemini3 }}</span>
                         </div>
                         <div class="flex justify-between">
                             <span class="text-gray-400">容量</span>
-                            <span class="font-mono">{{ antigravityStats.capacity.gemini3 }}</span>
+                            <span class="font-mono">{{ config.antigravity.use_token_quota ? formatNumber(antigravityStats.capacity.tokens.gemini3) : antigravityStats.capacity.requests.gemini3 }}</span>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div>
-                <label class="block text-xs text-gray-500 mb-1">Claude 限额 (次/天)</label>
-                <input type="number" v-model.number="config.antigravity.claude_limit" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 focus:border-blue-500 outline-none transition text-gray-900">
+            <!-- Token Mode Switch -->
+            <div class="flex items-center justify-between py-2 border-b border-gray-100 mb-4">
+                <div class="flex items-center gap-2">
+                    <div class="p-1.5 rounded-lg bg-indigo-100 text-indigo-600">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 000 2h6a1 1 0 100-2H7z" clip-rule="evenodd" />
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="text-sm font-medium text-gray-700">Token 计费模式</div>
+                        <div class="text-xs text-gray-500">按 Token 数计算配额（默认按次数）</div>
+                    </div>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" v-model="config.antigravity.use_token_quota" class="sr-only peer">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                </label>
             </div>
-            <div>
-                <label class="block text-xs text-gray-500 mb-1">Gemini 3.0 限额 (次/天)</label>
-                <input type="number" v-model.number="config.antigravity.gemini3_limit" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 focus:border-blue-500 outline-none transition text-gray-900">
+
+            <div v-if="!config.antigravity.use_token_quota" class="space-y-4">
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Claude 限额 (次/天)</label>
+                    <input type="number" v-model.number="config.antigravity.claude_limit" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 focus:border-blue-500 outline-none transition text-gray-900">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Gemini 3.0 限额 (次/天)</label>
+                    <input type="number" v-model.number="config.antigravity.gemini3_limit" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 focus:border-blue-500 outline-none transition text-gray-900">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">每凭证增量 (Claude)</label>
+                        <input type="number" v-model.number="config.antigravity.increment_per_token_claude" min="0" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 focus:border-blue-500 outline-none transition text-gray-900">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">每凭证增量 (Gemini 3)</label>
+                        <input type="number" v-model.number="config.antigravity.increment_per_token_gemini3" min="0" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 focus:border-blue-500 outline-none transition text-gray-900">
+                    </div>
+                </div>
+            </div>
+
+            <div v-else class="space-y-4">
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Claude 配额 (Tokens/天)</label>
+                    <input type="number" v-model.number="config.antigravity.claude_token_quota" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 focus:border-blue-500 outline-none transition text-gray-900">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Gemini 3.0 配额 (Tokens/天)</label>
+                    <input type="number" v-model.number="config.antigravity.gemini3_token_quota" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 focus:border-blue-500 outline-none transition text-gray-900">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">每凭证增量 (Tokens/Claude)</label>
+                        <input type="number" v-model.number="config.antigravity.increment_token_per_token_claude" min="0" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 focus:border-blue-500 outline-none transition text-gray-900">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">每凭证增量 (Tokens/Gemini 3)</label>
+                        <input type="number" v-model.number="config.antigravity.increment_token_per_token_gemini3" min="0" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 focus:border-blue-500 outline-none transition text-gray-900">
+                    </div>
+                </div>
             </div>
         </div>
     </div>

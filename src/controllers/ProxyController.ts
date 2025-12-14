@@ -274,47 +274,82 @@ export class ProxyController {
         const realModel = extractRealModelName(requestedModel);
         const group = realModel.includes('gemini-3') ? 'gemini3' : 'claude';
         
+        // Load Antigravity Config
         let claudeLimit = 100;
         let gemini3Limit = 200;
+        let useTokenQuota = false;
+        let claudeTokenQuota = 100000;
+        let gemini3TokenQuota = 200000;
+        let config: any = {};
+
         try {
             const configSetting = await prisma.systemSetting.findUnique({ where: { key: 'ANTIGRAVITY_CONFIG' } });
             if (configSetting) {
-                const config = JSON.parse(configSetting.value);
+                config = JSON.parse(configSetting.value);
                 claudeLimit = config.claude_limit ?? 100;
                 gemini3Limit = config.gemini3_limit ?? 200;
+                useTokenQuota = !!config.use_token_quota;
+                claudeTokenQuota = config.claude_token_quota ?? 100000;
+                gemini3TokenQuota = config.gemini3_token_quota ?? 200000;
             }
         } catch (e) {
             console.error('Failed to load ANTIGRAVITY_CONFIG', e);
         }
         
-        const limit = group === 'gemini3' ? gemini3Limit : claudeLimit;
-        const todayStr = new Date().toISOString().split('T')[0];
-        const usageKey = `USAGE:${todayStr}:${user.id}:antigravity:${group}`;
+        // Calculate Base Limit (Token or Request count)
+        const base = useTokenQuota 
+            ? (group === 'gemini3' ? gemini3TokenQuota : claudeTokenQuota)
+            : (group === 'gemini3' ? gemini3Limit : claudeLimit);
 
+        // Calculate Increment based on User's Active Credentials
+        const userTokenCount = await prisma.antigravityToken.count({
+            where: { owner_id: user.id, status: 'ACTIVE', is_enabled: true }
+        });
+
+        const inc = useTokenQuota 
+            ? (group === 'gemini3' ? config.increment_token_per_token_gemini3 : config.increment_token_per_token_claude)
+            : (group === 'gemini3' ? config.increment_per_token_gemini3 : config.increment_per_token_claude);
+        
+        const computedLimit = base + (userTokenCount > 0 ? userTokenCount * (inc || 0) : 0);
+
+        const todayStr = new Date().toISOString().split('T')[0];
+        
+        // Dual Keys: Always maintain both counters
+        const usageKeyRequests = `USAGE:requests:${todayStr}:${user.id}:antigravity:${group}`;
+        const usageKeyTokens = `USAGE:tokens:${todayStr}:${user.id}:antigravity:${group}`;
+        
+        // Legacy Key (Fallback/Migration) - eventually we can deprecate this
+        // But for now, let's just use the specific keys for logic
+        
         const strictSetting = await prisma.systemSetting.findUnique({ where: { key: 'ANTIGRAVITY_STRICT_MODE' } });
         const strictMode = strictSetting ? strictSetting.value === 'true' : false;
 
-        if (!isAdminKey && user.role !== 'ADMIN' && strictMode) {
-            const hasAccess = await antigravityTokenManager.hasAntigravityAccess(user.id);
-            if (!hasAccess) {
-                console.warn('[Antigravity] Strict mode enabled, user without valid credential blocked:', user.id);
-                return reply.code(403).send({
-                    error: {
-                        message: '🔒 已开启反重力严格模式：仅上传过有效凭证的用户可以使用反重力渠道。',
-                        type: 'forbidden'
-                    }
-                });
-            }
-        }
+        // Note: Strict mode restriction "only users with uploaded credentials can use antigravity" has been removed as per request.
+        // Users are now only limited by quota/tokens.
+        // if (!isAdminKey && user.role !== 'ADMIN' && strictMode) {
+        //     const hasAccess = await antigravityTokenManager.hasAntigravityAccess(user.id);
+        //     if (!hasAccess) {
+        //         console.warn('[Antigravity] Strict mode enabled, user without valid credential blocked:', user.id);
+        //         return reply.code(403).send({
+        //             error: {
+        //                 message: '🔒 已开启反重力严格模式：仅上传过有效凭证的用户可以使用反重力渠道。',
+        //                 type: 'forbidden'
+        //             }
+        //         });
+        //     }
+        // }
 
         if (!isAdminKey && strictMode) {
             const userOverride = group === 'gemini3' ? user.ag_gemini3_limit : user.ag_claude_limit;
-            const effectiveLimit = (userOverride && userOverride > 0) ? userOverride : limit;
+            const effectiveLimit = (userOverride && userOverride > 0) ? userOverride : computedLimit;
 
-            const current = parseInt((await redis.get(usageKey)) || '0', 10);
+            // Check limit based on current mode
+            const current = parseInt((await redis.get(useTokenQuota ? usageKeyTokens : usageKeyRequests)) || '0', 10);
+            
             if (current >= effectiveLimit) {
+                const unit = useTokenQuota ? 'Tokens' : 'Requests';
                 return reply.code(402).send({
-                    error: { message: `Antigravity ${group} daily limit reached (${current}/${effectiveLimit})`, type: 'quota_exceeded' }
+                    error: { message: `Antigravity ${group} daily limit reached (${current}/${effectiveLimit} ${unit})`, type: 'quota_exceeded' }
                 });
             }
         }
@@ -360,17 +395,26 @@ export class ProxyController {
                             }).catch(() => { });
                             tokenUsed = true;
                         }
-                        if (!agUsageCounted && (data.type === 'text' || data.type === 'thinking')) {
+                        if (!agUsageCounted && (data.type === 'usage')) {
                             try {
-                                const newCount = await redis.incr(usageKey);
-                                if (newCount === 1) {
-                                    const now = new Date();
-                                    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-                                    const seconds = Math.floor((tomorrow.getTime() - now.getTime()) / 1000);
-                                    await redis.expire(usageKey, seconds);
-                                }
-                                await redis.hincrby(`AG_GLOBAL:${todayStr}`, group, 1);
-                                await redis.expire(`AG_GLOBAL:${todayStr}`, 86400);
+                                const usageTokens = data.usage?.total_tokens || 0;
+                                
+                                // Dual Counting: Always increment both (requests +1, tokens +usageTokens)
+                                await redis.incr(usageKeyRequests);
+                                await redis.incrby(usageKeyTokens, usageTokens);
+                                
+                                // Set expiry for both
+                                const now = new Date();
+                                const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+                                const seconds = Math.floor((tomorrow.getTime() - now.getTime()) / 1000);
+                                await redis.expire(usageKeyRequests, seconds);
+                                await redis.expire(usageKeyTokens, seconds);
+
+                                // Global Stats: Dual Counting
+                                await redis.hincrby(`AG_GLOBAL:requests:${todayStr}`, group, 1);
+                                await redis.hincrby(`AG_GLOBAL:tokens:${todayStr}`, group, usageTokens);
+                                await redis.expire(`AG_GLOBAL:requests:${todayStr}`, 86400);
+                                await redis.expire(`AG_GLOBAL:tokens:${todayStr}`, 86400);
                             } catch {}
                             agUsageCounted = true;
                         }
@@ -435,15 +479,24 @@ export class ProxyController {
                     data: { total_used: { increment: 1 }, last_used_at: new Date() }
                 }).catch(() => { });
                 try {
-                    const newCount = await redis.incr(usageKey);
-                    if (newCount === 1) {
-                        const now = new Date();
-                        const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-                        const seconds = Math.floor((tomorrow.getTime() - now.getTime()) / 1000);
-                        await redis.expire(usageKey, seconds);
-                    }
-                    await redis.hincrby(`AG_GLOBAL:${todayStr}`, group, 1);
-                    await redis.expire(`AG_GLOBAL:${todayStr}`, 86400);
+                    const usageTokens = usage?.total_tokens || 0;
+                    
+                    // Dual Counting: Always increment both (requests +1, tokens +usageTokens)
+                    await redis.incr(usageKeyRequests);
+                    await redis.incrby(usageKeyTokens, usageTokens);
+                    
+                    // Set expiry for both
+                    const now = new Date();
+                    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+                    const seconds = Math.floor((tomorrow.getTime() - now.getTime()) / 1000);
+                    await redis.expire(usageKeyRequests, seconds);
+                    await redis.expire(usageKeyTokens, seconds);
+
+                    // Global Stats: Dual Counting
+                    await redis.hincrby(`AG_GLOBAL:requests:${todayStr}`, group, 1);
+                    await redis.hincrby(`AG_GLOBAL:tokens:${todayStr}`, group, usageTokens);
+                    await redis.expire(`AG_GLOBAL:requests:${todayStr}`, 86400);
+                    await redis.expire(`AG_GLOBAL:tokens:${todayStr}`, 86400);
                 } catch {}
 
                 const message: any = { role: 'assistant', content };
@@ -827,16 +880,33 @@ export class ProxyController {
 
     private static async recordSuccessfulCall(credentialId: number, modelName: string, userId: number) {
         let key = 'other';
-        if (modelName.includes('gemini-2.5-flash')) key = 'gemini-2.5-flash';
-        else if (modelName.includes('gemini-2.5-pro')) key = 'gemini-2.5-pro';
-        else if (modelName.includes('gemini-3-pro-preview')) key = 'gemini-3-pro-preview';
+        let globalKey = 'other';
+
+        if (modelName.includes('gemini-2.5-flash')) {
+            key = 'gemini-2.5-flash';
+            globalKey = 'flash';
+        } else if (modelName.includes('gemini-2.5-pro')) {
+            key = 'gemini-2.5-pro';
+            globalKey = 'pro';
+        } else if (modelName.includes('gemini-3-pro-preview') || modelName.includes('gemini-3')) {
+            key = 'gemini-3-pro-preview';
+            globalKey = 'v3';
+        }
 
         const todayStr = new Date().toISOString().split('T')[0];
-        const statsKey = `USER_STATS:${userId}:${todayStr}`;
+        const userStatsKey = `USER_STATS:${userId}:${todayStr}`;
+        const globalStatsKey = `GLOBAL_STATS:${todayStr}`;
 
         try {
-            await redis.hincrby(statsKey, key, 1);
-            await redis.expire(statsKey, 172800);
+            // User Stats (Detailed keys)
+            await redis.hincrby(userStatsKey, key, 1);
+            await redis.expire(userStatsKey, 172800); // 2 days
+
+            // Global Stats (Simplified keys for Admin Dashboard)
+            if (globalKey !== 'other') {
+                await redis.hincrby(globalStatsKey, globalKey, 1);
+                await redis.expire(globalStatsKey, 172800);
+            }
         } catch (e) {}
     }
 

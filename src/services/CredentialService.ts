@@ -182,7 +182,7 @@ export class CredentialService {
    * Verifies the credential by making a real request to the internal Cloud Code API.
    * Uses the correct wrapper structure found in gemini-cli-core.
    */
-  private async verifyCloudCodeAccess(accessToken: string, projectId: string, modelName: string = 'gemini-2.5-flash'): Promise<boolean> {
+  public async verifyCloudCodeAccess(accessToken: string, projectId: string, modelName: string = 'gemini-2.5-flash'): Promise<boolean> {
     const baseUrl = process.env.GOOGLE_CLOUD_CODE_URL || 'https://cloudcode-pa.googleapis.com';
     const targetUrl = `${baseUrl}/v1internal:generateContent`;
     
@@ -241,7 +241,10 @@ export class CredentialService {
 
       const errorText = await body.text();
       console.error(`[CredentialService] Validation Failed for ${modelName} (${statusCode}):`, errorText);
-      // Throw error to propagate failure reason
+      
+      // If it's a 403, we now treat it as a failure because this is an actual generation attempt.
+      // If generation fails with 403, the credential is not usable for this model.
+      
       throw new Error(`API Error ${statusCode}: ${errorText.substring(0, 200)}`);
 
     } catch (error: any) {

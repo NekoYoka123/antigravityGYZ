@@ -201,12 +201,15 @@
           <div class="stat-card bg-gradient-to-br from-purple-900/60 to-indigo-900/60 border border-purple-500/40 rounded-xl md:rounded-2xl p-4 md:p-5 text-center">
             <div class="text-2xl md:text-4xl font-black text-purple-200 mb-1 md:mb-2">
               {{
-                (agOverview.usage?.claude || 0) +
-                (agOverview.usage?.gemini3 || 0)
+                formatNumber(
+                    isTokenMode 
+                    ? ((agOverview.usage?.tokens?.claude || 0) + (agOverview.usage?.tokens?.gemini3 || 0))
+                    : ((agOverview.usage?.requests?.claude || 0) + (agOverview.usage?.requests?.gemini3 || 0))
+                )
               }}
             </div>
             <div class="text-[10px] md:text-xs text-purple-100/80 uppercase tracking-wider font-bold">
-              所有成员今日已用反重力额度
+              所有成员今日已用{{ isTokenMode ? 'Tokens' : '反重力额度' }}
             </div>
           </div>
           <div class="stat-card bg-gradient-to-br from-blue-900/60 to-cyan-900/60 border border-cyan-500/40 rounded-xl md:rounded-2xl p-4 md:p-5">
@@ -215,15 +218,15 @@
             </div>
             <div class="flex flex-col gap-2 text-xs md:text-sm text-cyan-100/90">
               <div class="flex items-baseline justify-between">
-                <span class="font-semibold">Claude 容量</span>
+                <span class="font-semibold">Claude {{ isTokenMode ? 'Tokens' : '容量' }}</span>
                 <span class="font-mono text-base md:text-lg text-cyan-200">
-                  {{ agOverview.capacity?.claude || 0 }}
+                  {{ formatNumber(isTokenMode ? (agOverview.capacity?.tokens?.claude || 0) : (agOverview.capacity?.requests?.claude || 0)) }}
                 </span>
               </div>
               <div class="flex items-baseline justify-between">
-                <span class="font-semibold">Gemini 3 容量</span>
+                <span class="font-semibold">Gemini 3 {{ isTokenMode ? 'Tokens' : '容量' }}</span>
                 <span class="font-mono text-base md:text-lg text-cyan-200">
-                  {{ agOverview.capacity?.gemini3 || 0 }}
+                  {{ formatNumber(isTokenMode ? (agOverview.capacity?.tokens?.gemini3 || 0) : (agOverview.capacity?.requests?.gemini3 || 0)) }}
                 </span>
               </div>
             </div>
@@ -373,6 +376,7 @@ const tokenOrder = ref<'asc' | 'desc'>('asc');
 
 const stats = ref({ total: 0, active: 0, inactive: 0, total_capacity: 0, personal_max_usage: 0 });
 const agOverview = ref<any | null>(null);
+const agConfig = ref<any | null>(null);
 const loadingTokens = ref(false);
 const refreshing = ref(false);
 const agStrictMode = ref(false);
@@ -555,6 +559,15 @@ const fetchAgOverview = async () => {
   }
 };
 
+const fetchAgConfig = async () => {
+  if (!isAdmin.value) return;
+  try {
+    const res = await api.get('/antigravity/config');
+    agConfig.value = res.data;
+  } catch (e) {
+  }
+};
+
 const fetchAgStrictMode = async () => {
   if (!isAdmin.value) return;
   try {
@@ -617,6 +630,7 @@ const refreshAllTokens = async () => {
     messageType.value = 'success';
     fetchTokens();
     fetchAgOverview();
+    fetchAgConfig();
   } catch (e: any) {
     message.value = ' 刷新失败: ' + (e.response?.data?.error || e.message);
     messageType.value = 'error';
@@ -625,11 +639,26 @@ const refreshAllTokens = async () => {
   }
 };
 
+const isTokenMode = computed(() => {
+  if (agConfig.value && typeof agConfig.value.use_token_quota !== 'undefined') {
+    return !!agConfig.value.use_token_quota;
+  }
+  return !!agOverview.value?.meta?.limits?.use_token_quota;
+});
+
+const formatNumber = (num: number) => {
+    if (!isTokenMode.value) return num;
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'k';
+    return num;
+};
+
 onMounted(() => {
   fetchMyTokens();
   if (isAdmin.value) {
     fetchTokens();
     fetchAgOverview();
+    fetchAgConfig();
     fetchAgStrictMode();
   }
 });

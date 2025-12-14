@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
+import { ref, onMounted, watch, computed } from 'vue';
 import { api } from '../utils/api';
 import GaugeChart from './GaugeChart.vue';
+
+const props = defineProps<{
+    config?: any;
+}>();
 
 const users = ref<any[]>([]);
 const pagination = ref({ page: 1, limit: 10, total: 0, total_pages: 1 });
@@ -98,7 +102,16 @@ const openPasswordModal = (user: any) => {
     showPasswordModal.value = true;
 };
 
-const confirmPassword = async () => {
+const isTokenMode = computed(() => !!props.config?.antigravity?.use_token_quota);
+
+const formatNumber = (num: number) => {
+    if (!isTokenMode.value) return num;
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'k';
+    return num;
+};
+
+const confirmPasswordReset = async () => {
     if (newPassword.value.length < 6) return alert('密码至少6位');
     try {
         await api.post(`/admin/users/${selectedUser.value.id}/reset-password`, { password: newPassword.value });
@@ -214,17 +227,23 @@ onMounted(fetchUsers);
                     <div class="flex items-center gap-2 text-xs">
                         <span class="w-12 text-gray-500 font-bold">C</span>
                         <div class="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                             <div class="h-full bg-blue-500" :style="{ width: Math.min((user.ag_claude_used / (user.ag_claude_limit || 100)) * 100, 100) + '%' }"></div>
+                             <div class="h-full bg-blue-500" :style="{ width: Math.min(((isTokenMode ? user.ag_claude_used_tokens : user.ag_claude_used_requests) / (isTokenMode ? user.ag_claude_token_limit : user.ag_claude_limit || 100)) * 100, 100) + '%' }"></div>
                         </div>
-                        <span class="text-gray-600 font-mono text-[10px]">{{ user.ag_claude_used }}/{{ user.ag_claude_limit || 100 }}</span>
+                        <span class="text-gray-600 font-mono text-[10px]">
+                            {{ formatNumber(isTokenMode ? user.ag_claude_used_tokens : user.ag_claude_used_requests) }} / 
+                            {{ formatNumber(isTokenMode ? user.ag_claude_token_limit : user.ag_claude_limit || 100) }}
+                        </span>
                     </div>
                     <!-- Gemini 3 -->
                     <div class="flex items-center gap-2 text-xs">
                         <span class="w-12 text-gray-500 font-bold">G3</span>
                         <div class="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                             <div class="h-full bg-purple-500" :style="{ width: Math.min((user.ag_gemini3_used / (user.ag_gemini3_limit || 200)) * 100, 100) + '%' }"></div>
+                             <div class="h-full bg-purple-500" :style="{ width: Math.min(((isTokenMode ? user.ag_gemini3_used_tokens : user.ag_gemini3_used_requests) / (isTokenMode ? user.ag_gemini3_token_limit : user.ag_gemini3_limit || 200)) * 100, 100) + '%' }"></div>
                         </div>
-                        <span class="text-gray-600 font-mono text-[10px]">{{ user.ag_gemini3_used }}/{{ user.ag_gemini3_limit || 200 }}</span>
+                        <span class="text-gray-600 font-mono text-[10px]">
+                            {{ formatNumber(isTokenMode ? user.ag_gemini3_used_tokens : user.ag_gemini3_used_requests) }} / 
+                            {{ formatNumber(isTokenMode ? user.ag_gemini3_token_limit : user.ag_gemini3_limit || 200) }}
+                        </span>
                     </div>
                 </div>
             </td>

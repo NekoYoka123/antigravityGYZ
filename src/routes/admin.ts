@@ -112,7 +112,17 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         try { systemConfig = { ...systemConfig, ...JSON.parse(configSetting.value) }; } catch(e){}
     }
     const agConfigSetting = await prisma.systemSetting.findUnique({ where: { key: 'ANTIGRAVITY_CONFIG' } });
-    let agConfig = { claude_limit: 100, gemini3_limit: 200 };
+    let agConfig: any = {
+        claude_limit: 100,
+        gemini3_limit: 200,
+        use_token_quota: false,
+        claude_token_quota: 100000,
+        gemini3_token_quota: 200000,
+        increment_per_token_claude: 0,
+        increment_per_token_gemini3: 0,
+        increment_token_per_token_claude: 0,
+        increment_token_per_token_gemini3: 0
+    };
     if (agConfigSetting) {
         try { agConfig = { ...agConfig, ...JSON.parse(agConfigSetting.value) }; } catch(e){}
     }
@@ -146,25 +156,73 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         // Ignore redis errors, just return 0
     }
     
-    const userAgClaude = (user as any).ag_claude_limit || 0;
-    const userAgGemini3 = (user as any).ag_gemini3_limit || 0;
-    const effectiveAgClaudeLimit = userAgClaude > 0 ? userAgClaude : agConfig.claude_limit;
-    const effectiveAgGemini3Limit = userAgGemini3 > 0 ? userAgGemini3 : agConfig.gemini3_limit;
+    const useTokenQuota = !!agConfig.use_token_quota;
+    const userAgClaudeOverride = (user as any).ag_claude_limit || 0;
+    const userAgGemini3Override = (user as any).ag_gemini3_limit || 0;
 
-    let agUsage = { claude: 0, gemini3: 0, limits: { claude: effectiveAgClaudeLimit, gemini3: effectiveAgGemini3Limit } };
+    const userAgTokenCount = await prisma.antigravityToken.count({
+        where: { owner_id: userId, status: 'ACTIVE', is_enabled: true }
+    });
+
+    const baseClaude = useTokenQuota ? (agConfig.claude_token_quota || 100000) : (agConfig.claude_limit || 100);
+    const baseGemini3 = useTokenQuota ? (agConfig.gemini3_token_quota || 200000) : (agConfig.gemini3_limit || 200);
+
+    const incClaude = useTokenQuota ? (agConfig.increment_token_per_token_claude || 0) : (agConfig.increment_per_token_claude || 0);
+    const incGemini3 = useTokenQuota ? (agConfig.increment_token_per_token_gemini3 || 0) : (agConfig.increment_per_token_gemini3 || 0);
+
+    const computedClaudeLimit = baseClaude + (userAgTokenCount > 0 ? userAgTokenCount * incClaude : 0);
+    const computedGemini3Limit = baseGemini3 + (userAgTokenCount > 0 ? userAgTokenCount * incGemini3 : 0);
+
+    const effectiveAgClaudeLimit = userAgClaudeOverride > 0 ? userAgClaudeOverride : computedClaudeLimit;
+    const effectiveAgGemini3Limit = userAgGemini3Override > 0 ? userAgGemini3Override : computedGemini3Limit;
+
+    let agUsage: any = { 
+        claude: 0, 
+        gemini3: 0, 
+        limits: { claude: effectiveAgClaudeLimit, gemini3: effectiveAgGemini3Limit },
+        requests: { claude: 0, gemini3: 0 },
+        tokens: { claude: 0, gemini3: 0 },
+        use_token_quota: useTokenQuota
+    };
     try {
-        const claudeKey = `USAGE:${todayStr}:${userId}:antigravity:claude`;
-        const geminiKey = `USAGE:${todayStr}:${userId}:antigravity:gemini3`;
-        const claude = parseInt((await redis.get(claudeKey)) || '0', 10);
-        const gemini3 = parseInt((await redis.get(geminiKey)) || '0', 10);
-        agUsage = {
-            claude,
-            gemini3,
-            limits: {
-                claude: effectiveAgClaudeLimit,
-                gemini3: effectiveAgGemini3Limit
-            }
-        };
+        const claudeReqKey = `USAGE:requests:${todayStr}:${userId}:antigravity:claude`;
+        const geminiReqKey = `USAGE:requests:${todayStr}:${userId}:antigravity:gemini3`;
+        const claudeTokKey = `USAGE:tokens:${todayStr}:${userId}:antigravity:claude`;
+        const geminiTokKey = `USAGE:tokens:${todayStr}:${userId}:antigravity:gemini3`;
+        const claudeLegacyKey = `USAGE:${todayStr}:${userId}:antigravity:claude`;
+        const geminiLegacyKey = `USAGE:${todayStr}:${userId}:antigravity:gemini3`;
+
+        const [
+            claudeReqRaw,
+            geminiReqRaw,
+            claudeTokRaw,
+            geminiTokRaw,
+            claudeLegacyRaw,
+            geminiLegacyRaw
+        ] = await Promise.all([
+            redis.get(claudeReqKey),
+            redis.get(geminiReqKey),
+            redis.get(claudeTokKey),
+            redis.get(geminiTokKey),
+            redis.get(claudeLegacyKey),
+            redis.get(geminiLegacyKey)
+        ]);
+
+        const claudeRequests = parseInt(claudeReqRaw || claudeLegacyRaw || '0', 10);
+        const gemini3Requests = parseInt(geminiReqRaw || geminiLegacyRaw || '0', 10);
+        const claudeTokens = parseInt(claudeTokRaw || '0', 10);
+        const gemini3Tokens = parseInt(geminiTokRaw || '0', 10);
+
+        agUsage.requests = { claude: claudeRequests, gemini3: gemini3Requests };
+        agUsage.tokens = { claude: claudeTokens, gemini3: gemini3Tokens };
+
+        if (useTokenQuota) {
+            agUsage.claude = claudeTokens;
+            agUsage.gemini3 = gemini3Tokens;
+        } else {
+            agUsage.claude = claudeRequests;
+            agUsage.gemini3 = gemini3Requests;
+        }
     } catch(e) {}
 
     return {
@@ -631,10 +689,23 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       })
     ]);
 
+    const setting = await prisma.systemSetting.findUnique({ where: { key: 'ANTIGRAVITY_CONFIG' } });
+    let agConfig = { claude_limit: 100, gemini3_limit: 200, claude_token_quota: 100000, gemini3_token_quota: 200000 };
+    if (setting) {
+        try { agConfig = { ...agConfig, ...JSON.parse(setting.value) }; } catch(e){}
+    }
+
     const todayStr = new Date().toISOString().split('T')[0];
     const enhancedUsers = await Promise.all(users.map(async u => {
-        const claudeUsed = await redis.get(`USAGE:${todayStr}:${u.id}:antigravity:claude`);
-        const gemini3Used = await redis.get(`USAGE:${todayStr}:${u.id}:antigravity:gemini3`);
+        // Dual keys
+        const claudeRequests = await redis.get(`USAGE:requests:${todayStr}:${u.id}:antigravity:claude`);
+        const gemini3Requests = await redis.get(`USAGE:requests:${todayStr}:${u.id}:antigravity:gemini3`);
+        const claudeTokens = await redis.get(`USAGE:tokens:${todayStr}:${u.id}:antigravity:claude`);
+        const gemini3Tokens = await redis.get(`USAGE:tokens:${todayStr}:${u.id}:antigravity:gemini3`);
+        
+        // Legacy fallback
+        const claudeLegacy = await redis.get(`USAGE:${todayStr}:${u.id}:antigravity:claude`);
+        const gemini3Legacy = await redis.get(`USAGE:${todayStr}:${u.id}:antigravity:gemini3`);
 
         return {
             id: u.id,
@@ -651,8 +722,13 @@ export default async function adminRoutes(fastify: FastifyInstance) {
             discordAvatar: (u as any).discordAvatar || null,
             ag_claude_limit: (u as any).ag_claude_limit ?? 0,
             ag_gemini3_limit: (u as any).ag_gemini3_limit ?? 0,
-            ag_claude_used: parseInt(claudeUsed || '0', 10),
-            ag_gemini3_used: parseInt(gemini3Used || '0', 10)
+            ag_claude_used_requests: parseInt(claudeRequests || claudeLegacy || '0', 10),
+            ag_gemini3_used_requests: parseInt(gemini3Requests || gemini3Legacy || '0', 10),
+            ag_claude_used_tokens: parseInt(claudeTokens || '0', 10),
+            ag_gemini3_used_tokens: parseInt(gemini3Tokens || '0', 10),
+            ag_claude_token_limit: agConfig.claude_token_quota,
+            ag_gemini3_token_limit: agConfig.gemini3_token_quota,
+            ag_active_tokens: (u as any)._count?.antigravity_tokens || 0 // Assuming you added relation count in query, if not we need to fetch
         };
     }));
 
