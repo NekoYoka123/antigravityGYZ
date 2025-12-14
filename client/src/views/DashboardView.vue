@@ -73,6 +73,21 @@
         </div>
       </header>
       
+      <div v-if="notifications.length > 0" class="mb-4">
+        <div class="rounded-2xl p-3 md:p-4 bg-gradient-to-r from-pink-600/20 to-cyan-600/20 border border-white/10 text-white flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="text-xl">🔔</span>
+            <div>
+              <div class="text-sm md:text-base font-bold">系统提醒</div>
+              <div class="text-xs md:text-sm text-white/70">
+                {{ notifications[0].message }}（{{ new Date(notifications[0].time).toLocaleString() }}）
+              </div>
+            </div>
+          </div>
+          <button @click="hideNotification = true" class="text-xs md:text-sm px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 transition-colors">我知道了</button>
+        </div>
+      </div>
+      
       <div v-if="!userInfo.discordId" class="mb-6">
         <div class="bg-[#4752C4]/20 border border-[#5865F2]/30 rounded-2xl p-4 flex items-center justify-between">
           <div class="text-sm">
@@ -84,7 +99,7 @@
       </div>
 
       <!-- 1. 概览 (Home) -->
-      <div v-if="currentTab === 'home'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 auto-rows-[170px]">
+      <div v-if="currentTab === 'home'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 md:auto-rows-[170px]">
         
         <!-- 今日用量仪表盘（左侧卡片，保留仪表盘） -->
         <div 
@@ -815,6 +830,13 @@ const pageTitle = computed(() => {
     case 'antigravity': return '反重力渠道';
     default: return 'Dashboard';
   }
+});
+
+const hideNotification = ref(false);
+const notifications = computed(() => {
+  if (hideNotification.value) return [];
+  const n = (stats.value as any)?.notifications;
+  return Array.isArray(n) ? n : [];
 });
 
 const showForceDiscordModal = computed(() => {

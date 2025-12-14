@@ -225,6 +225,19 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         }
     } catch(e) {}
 
+    const lastDay = new Date();
+    lastDay.setHours(lastDay.getHours() - 24);
+    const recentAlerts = await prisma.usageLog.findMany({
+        where: { user_id: userId, status_code: 470, created_at: { gte: lastDay } },
+        orderBy: { created_at: 'desc' },
+        take: 5
+    });
+    const notifications = recentAlerts.map(a => ({
+        type: 'antigravity_cleanup',
+        message: '部分反重力凭证失效已自动清理',
+        time: a.created_at
+    }));
+
     return {
       id: user.id,
       email: user.email,
@@ -240,7 +253,8 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       contributed_active: user._count.credentials,
       contributed_v3_active: v3Count,
       system_config: systemConfig,
-      force_discord_bind: forceBindSetting ? forceBindSetting.value === 'true' : false
+      force_discord_bind: forceBindSetting ? forceBindSetting.value === 'true' : false,
+      notifications
     };
   });
 
@@ -373,8 +387,9 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return {
       data: credentials.map(c => ({
         id: c.id,
-        name: c.client_id ? `...${c.client_id.slice(0, 15)}` : `Credential #${c.id}`, // Truncated Client ID as name
+        name: c.client_id ? `...${c.client_id.slice(0, 15)}` : `Credential #${c.id}`,
         owner_email: c.owner.email,
+        google_email: c.google_email,
         status: c.status,
         fail_count: c.fail_count,
         last_validated: c.last_validated_at,

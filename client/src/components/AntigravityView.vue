@@ -79,29 +79,64 @@
           </div>
 
           <!-- Step 2 -->
-          <div class="step-card bg-gradient-to-br from-indigo-900/50 to-cyan-900/50 border border-cyan-500/20 rounded-xl md:rounded-2xl p-4 md:p-6">
-            <div class="flex items-center gap-2 md:gap-3 mb-3 md:mb-4">
-              <span class="w-7 h-7 md:w-8 md:h-8 rounded-full bg-cyan-500 flex items-center justify-center text-white font-bold text-sm md:text-base pulse-ring-cyan">2</span>
-              <span class="text-white font-bold text-sm md:text-base">提交授权码</span>
+          <div class="step-card bg-gradient-to-br from-indigo-900/50 to-cyan-900/50 border border-cyan-500/20 rounded-xl md:rounded-2xl p-4 md:p-6 space-y-4">
+            <div>
+              <div class="flex items-center gap-2 md:gap-3 mb-3 md:mb-4">
+                <span class="w-7 h-7 md:w-8 md:h-8 rounded-full bg-cyan-500 flex items-center justify-center text-white font-bold text-sm md:text-base pulse-ring-cyan">2</span>
+                <span class="text-white font-bold text-sm md:text-base">提交授权码</span>
+              </div>
+              <div class="mb-2 text-xs text-cyan-200/80 leading-relaxed break-words">
+                请在完成Google授权后, 从打开的显示无法访问的页面的地址栏中完整复制整个网址并粘贴到下方。
+              </div>
+              <textarea v-model="authCode" rows="3" placeholder="粘贴完整网址..."
+                class="w-full px-4 py-3 rounded-xl bg-black/40 border border-cyan-500/30 text-white placeholder-white/30 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 outline-none transition-all text-xs resize-none"></textarea>
+              <div class="mt-2 flex items-center gap-2 text-white/70 text-xs md:text-sm">
+                <input type="checkbox" id="skipValidation" v-model="skipValidation" class="rounded border-cyan-500/30 bg-black/40 text-cyan-500 focus:ring-cyan-500/50">
+                <label for="skipValidation" class="cursor-pointer hover:text-cyan-300 transition-colors">如果是家庭共享账号，请勾选此项以跳过验证错误（不推荐）</label>
+              </div>
+              <button @click="submitAuthCode" :disabled="!authCode || submitting"
+                class="w-full mt-3 md:mt-4 py-3 md:py-4 rounded-xl bg-gradient-to-r from-cyan-600 to-teal-600 text-white font-bold text-sm md:text-base hover:from-cyan-500 hover:to-teal-500 transition-all transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-cyan-500/30 neon-button-cyan">
+                <span v-if="submitting && uploadMode==='oauth'" class="flex items-center justify-center gap-2">
+                  <span class="animate-spin">&#9881;</span> 验证中...
+                </span>
+                <span v-else class="flex items-center justify-center gap-2">
+                  &#10024; 提交授权码
+                </span>
+              </button>
             </div>
-            <div class="mb-2 text-xs text-cyan-200/80 leading-relaxed break-words">
-              请在完成Google授权后, 从打开的显示无法访问的页面的地址栏中完整复制整个网址并粘贴到下方。
+
+            <div class="pt-3 border-t border-cyan-500/20 space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-white font-bold text-xs md:text-sm flex items-center gap-2">
+                  <span class="text-base md:text-lg">&#128190;</span> 本地 JSON 凭证上传
+                </span>
+                <span class="text-[10px] md:text-xs text-cyan-200/70">用于已导出 OAuth JSON 的账号</span>
+              </div>
+              <div class="flex flex-col md:flex-row md:items-center gap-2">
+                <input
+                  ref="fileInput"
+                  type="file"
+                  accept=".json,application/json"
+                  class="block w-full text-xs md:text-sm text-cyan-100 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs md:file:text-sm file:font-semibold file:bg-cyan-500/20 file:text-cyan-100 hover:file:bg-cyan-500/30 cursor-pointer bg-black/30 rounded-lg border border-cyan-500/30"
+                  @change="handleFileChange"
+                >
+                <button
+                  @click="uploadLocalCredential"
+                  :disabled="!localJsonContent || submitting"
+                  class="flex-1 md:flex-none md:w-40 py-2.5 md:py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-bold text-xs md:text-sm hover:from-emerald-400 hover:to-cyan-400 transition-all transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/30"
+                >
+                  <span v-if="submitting && uploadMode==='local'" class="flex items-center justify-center gap-2">
+                    <span class="animate-spin">&#9881;</span> 上传中...
+                  </span>
+                  <span v-else class="flex items-center justify-center gap-2">
+                    &#128640; 上传本地凭证
+                  </span>
+                </button>
+              </div>
+              <div v-if="localFileName" class="text-[10px] md:text-xs text-cyan-200/80 truncate">
+                已选择：{{ localFileName }}
+              </div>
             </div>
-            <textarea v-model="authCode" rows="3" placeholder="粘贴完整网址..."
-              class="w-full px-4 py-3 rounded-xl bg-black/40 border border-cyan-500/30 text-white placeholder-white/30 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 outline-none transition-all text-xs resize-none"></textarea>
-            <div class="mt-2 flex items-center gap-2 text-white/70 text-xs md:text-sm">
-              <input type="checkbox" id="skipValidation" v-model="skipValidation" class="rounded border-cyan-500/30 bg-black/40 text-cyan-500 focus:ring-cyan-500/50">
-              <label for="skipValidation" class="cursor-pointer hover:text-cyan-300 transition-colors">如果是家庭共享账号，请勾选此项以跳过 Project ID 验证</label>
-            </div>
-            <button @click="submitAuthCode" :disabled="!authCode || submitting"
-              class="w-full mt-3 md:mt-4 py-3 md:py-4 rounded-xl bg-gradient-to-r from-cyan-600 to-teal-600 text-white font-bold text-sm md:text-base hover:from-cyan-500 hover:to-teal-500 transition-all transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-cyan-500/30 neon-button-cyan">
-              <span v-if="submitting" class="flex items-center justify-center gap-2">
-                <span class="animate-spin">&#9881;</span> 验证中...
-              </span>
-              <span v-else class="flex items-center justify-center gap-2">
-                &#10024; 提交授权码
-              </span>
-            </button>
           </div>
 
           <!-- Message -->
@@ -359,6 +394,11 @@ const messageType = ref<'success' | 'error'>('success');
 const skipValidation = ref(false);
 const isOAuthExpanded = ref(true);
 
+const uploadMode = ref<'oauth' | 'local'>('oauth');
+const fileInput = ref<HTMLInputElement | null>(null);
+const localJsonContent = ref('');
+const localFileName = ref('');
+
 const myTokens = ref<any[]>([]);
 const loadingMyTokens = ref(false);
 const page = ref(1);
@@ -431,6 +471,7 @@ const copyUrl = async () => {
 const submitAuthCode = async () => {
   if (!authCode.value) return;
   submitting.value = true;
+  uploadMode.value = 'oauth';
   message.value = '';
   try {
     // Extract code and port from callback URL
@@ -470,6 +511,48 @@ const submitAuthCode = async () => {
     messageType.value = 'error';
   } finally {
     submitting.value = false;
+  }
+};
+
+const handleFileChange = async (e: Event) => {
+  localJsonContent.value = '';
+  localFileName.value = '';
+  const target = e.target as HTMLInputElement;
+  const file = target.files && target.files[0];
+  if (!file) return;
+  localFileName.value = file.name;
+  try {
+    const text = await file.text();
+    localJsonContent.value = text;
+  } catch (err: any) {
+    message.value = '读取文件失败: ' + err.message;
+    messageType.value = 'error';
+  }
+};
+
+const uploadLocalCredential = async () => {
+  if (!localJsonContent.value) return;
+  submitting.value = true;
+  uploadMode.value = 'local';
+  message.value = '';
+  try {
+    const res = await api.post('/credentials', {
+      json_content: localJsonContent.value,
+      require_v3: false
+    });
+    message.value = ' 本地凭证上传成功！';
+    messageType.value = 'success';
+    localJsonContent.value = '';
+    localFileName.value = '';
+    if (fileInput.value) {
+      fileInput.value.value = '';
+    }
+  } catch (e: any) {
+    message.value = '本地上传失败: ' + (e.response?.data?.error || e.message);
+    messageType.value = 'error';
+  } finally {
+    submitting.value = false;
+    uploadMode.value = 'oauth';
   }
 };
 

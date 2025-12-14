@@ -70,6 +70,7 @@ model GoogleCredential {
   client_secret     String
     refresh_token     String
     project_id        String
+    google_email      String?
     access_token      String?
       expires_at        DateTime?
       cooling_expires_at DateTime?
@@ -87,6 +88,7 @@ model GoogleCredential {
   usage_logs        UsageLog[]
 
   @@index([status]) // Optimized for fetching ACTIVE credentials
+  @@index([google_email])
 }
 
 model UsageLog {
