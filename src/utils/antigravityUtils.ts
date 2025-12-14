@@ -195,7 +195,7 @@ export function normalizeParams(params: any = {}): {
     topK = Math.max(1, Math.min(1000, Math.round(topK)));
     let maxTokens = Number(params.max_tokens ?? params.max_completion_tokens ?? ANTIGRAVITY_CONFIG.defaults.maxTokens);
     if (!Number.isFinite(maxTokens)) maxTokens = ANTIGRAVITY_CONFIG.defaults.maxTokens;
-    maxTokens = Math.max(256, Math.min(8192, Math.round(maxTokens)));
+    maxTokens = Math.max(256, Math.min(50000, Math.round(maxTokens)));
 
     const stop = Array.isArray(params.stop) ? params.stop : undefined;
 
