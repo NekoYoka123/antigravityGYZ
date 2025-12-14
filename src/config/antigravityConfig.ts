@@ -18,7 +18,7 @@ export const ANTIGRAVITY_CONFIG = {
     temperature: 1,
     topP: 0.85,
     topK: 50,
-    maxTokens: 8096
+    maxTokens: 50000
   },
   timeout: 180000,
   skipProjectIdFetch: true
