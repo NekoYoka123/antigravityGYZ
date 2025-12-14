@@ -33,10 +33,10 @@ export class CredentialService {
     const clientId = parsedJson.client_id || parsedJson.web?.client_id || parsedJson.installed?.client_id;
     const clientSecret = parsedJson.client_secret || parsedJson.web?.client_secret || parsedJson.installed?.client_secret;
     const refreshToken = parsedJson.refresh_token;
-    const projectId = parsedJson.project_id; // project_id is now mandatory, no fallback
+    const projectId: string = parsedJson.project_id || '';
 
-    if (!clientId || !clientSecret || !refreshToken || !projectId) {
-        throw new Error('Invalid Credential JSON: Missing client_id, client_secret, refresh_token, or project_id');
+    if (!clientId || !clientSecret || !refreshToken) {
+        throw new Error('Invalid Credential JSON: Missing client_id, client_secret, or refresh_token');
     }
 
     // 2. Exchange Refresh Token for Access Token
@@ -45,8 +45,22 @@ export class CredentialService {
        throw new Error('Failed to refresh access token. The refresh token might be expired or invalid.');
     }
 
+    // 2.1 Fetch Google account email and enforce uniqueness (CLI requirement)
+    const googleEmail = await this.fetchGoogleEmail(accessToken);
+    if (!googleEmail) {
+        throw new Error('无法获取 Google 账号邮箱，请确认凭证是否有效');
+    }
+
+    const existingByEmail = await prisma.googleCredential.findFirst({
+        where: { google_email: googleEmail }
+    });
+
+    if (existingByEmail) {
+        throw new Error('当前 Google 账号已经上传过凭证，不允许重复上传');
+    }
+
     // 3. Active Validation against Cloud Code API
-    const isValid = await this.verifyCloudCodeAccess(accessToken, projectId);
+    const isValid = await this.verifyCloudCodeAccess(accessToken, projectId || undefined);
     if (!isValid) {
       throw new Error('Credential validation failed: Could not access Cloud Code API.');
     }
@@ -54,7 +68,7 @@ export class CredentialService {
     // 3.1 Check for Gemini 3.0 Support
     let supportsV3 = false;
     try {
-        supportsV3 = await this.verifyCloudCodeAccess(accessToken, projectId, 'gemini-3-pro-preview');
+        supportsV3 = await this.verifyCloudCodeAccess(accessToken, projectId || undefined, 'gemini-3-pro-preview', false);
         if (supportsV3) {
             console.log(`[CredentialService] User ${userId} credential supports Gemini 3.0`);
         }
@@ -84,6 +98,7 @@ export class CredentialService {
         const credential = await tx.googleCredential.create({
           data: {
             owner_id: userId,
+            google_email: googleEmail,
             client_id: clientId,
             client_secret: clientSecret,
             refresh_token: refreshToken,
@@ -182,14 +197,13 @@ export class CredentialService {
    * Verifies the credential by making a real request to the internal Cloud Code API.
    * Uses the correct wrapper structure found in gemini-cli-core.
    */
-  public async verifyCloudCodeAccess(accessToken: string, projectId: string, modelName: string = 'gemini-2.5-flash'): Promise<boolean> {
+  public async verifyCloudCodeAccess(accessToken: string, projectId?: string, modelName: string = 'gemini-2.5-flash', allow429: boolean = true): Promise<boolean> {
     const baseUrl = process.env.GOOGLE_CLOUD_CODE_URL || 'https://cloudcode-pa.googleapis.com';
     const targetUrl = `${baseUrl}/v1internal:generateContent`;
     
     // Use a more complete payload to avoid 400 errors from strict models
-    const payload = {
+    const payload: any = {
       model: modelName, 
-      project: projectId,
       user_prompt_id: 'validation-check',
       request: {
         contents: [
@@ -210,6 +224,9 @@ export class CredentialService {
         ]
       }
     };
+    if (projectId && projectId.trim() !== '') {
+      payload.project = projectId;
+    }
     
     try {
       const { statusCode, body } = await request(targetUrl, {
@@ -242,15 +259,62 @@ export class CredentialService {
       const errorText = await body.text();
       console.error(`[CredentialService] Validation Failed for ${modelName} (${statusCode}):`, errorText);
       
-      // If it's a 403, we now treat it as a failure because this is an actual generation attempt.
-      // If generation fails with 403, the credential is not usable for this model.
+      // Special handling for 429: allow upload flow to proceed when allow429=true
+      if (statusCode === 429) {
+        return allow429;
+      }
       
+      // Other errors (e.g., 403) are treated as failures
       throw new Error(`API Error ${statusCode}: ${errorText.substring(0, 200)}`);
 
     } catch (error: any) {
       console.error(`[CredentialService] Network/API Error for ${modelName}:`, error.message);
       throw error; // Propagate up
     }
+  }
+
+  /**
+   * Fetch Google account email via userinfo endpoint using access token.
+   * Returns null if request fails or email is missing.
+   */
+  private async fetchGoogleEmail(accessToken: string): Promise<string | null> {
+      const url = 'https://www.googleapis.com/oauth2/v2/userinfo';
+      
+      try {
+          const { statusCode, body } = await request(url, {
+              method: 'GET',
+              headers: {
+                  'Host': 'www.googleapis.com',
+                  'User-Agent': getUserAgent(),
+                  'Authorization': `Bearer ${accessToken}`,
+                  'Accept-Encoding': 'gzip'
+              },
+              headersTimeout: 30000,
+              bodyTimeout: 30000
+          });
+
+          if (statusCode !== 200) {
+              const text = await body.text();
+              console.error(`[CredentialService] Fetch Google userinfo failed (${statusCode}):`, text);
+              return null;
+          }
+
+          try {
+              const data = await body.json() as any;
+              const email = data?.email;
+              if (typeof email === 'string' && email.length > 0) {
+                  return email;
+              }
+              console.warn('[CredentialService] Google userinfo has no email field.');
+              return null;
+          } catch (e) {
+              console.error('[CredentialService] Failed to parse Google userinfo response:', e);
+              return null;
+          }
+      } catch (error: any) {
+          console.error('[CredentialService] Google userinfo request error:', error.message);
+          return null;
+      }
   }
 
   /**
@@ -265,7 +329,7 @@ export class CredentialService {
 
           // 2. Verify V3
           // Now verifyCloudCodeAccess throws on error, so we catch it below
-          await this.verifyCloudCodeAccess(accessToken, credential.project_id, 'gemini-3-pro-preview');
+          await this.verifyCloudCodeAccess(accessToken, credential.project_id, 'gemini-3-pro-preview', false);
 
           // If no error thrown, it's supported
           const supportsV3 = true;

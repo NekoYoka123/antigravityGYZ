@@ -139,8 +139,8 @@ export default async function credentialRoutes(fastify: FastifyInstance) {
             project_id: parsed.project_id
         };
 
-        if (!credMock.client_id || !credMock.client_secret || !credMock.refresh_token || !credMock.project_id) {
-            throw new Error('缺少必要字段 (client_id, client_secret, refresh_token, project_id)');
+        if (!credMock.client_id || !credMock.client_secret || !credMock.refresh_token) {
+            throw new Error('缺少必要字段 (client_id, client_secret, refresh_token)');
         }
 
         const result = await credentialService.checkV3Support(credMock);
@@ -157,4 +157,3 @@ export default async function credentialRoutes(fastify: FastifyInstance) {
     }
   });
 }
-

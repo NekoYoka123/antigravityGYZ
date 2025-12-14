@@ -1,6 +1,8 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { antigravityTokenManager } from '../services/AntigravityTokenManager';
 import { AntigravityService } from '../services/AntigravityService';
+import { ANTIGRAVITY_MODELS } from '../config/antigravityConfig';
+import { generateSessionId } from '../utils/antigravityUtils';
 import { PrismaClient } from '@prisma/client';
 import Redis from 'ioredis';
 import jwt from 'jsonwebtoken';
@@ -481,42 +483,33 @@ export default async function antigravityAdminRoutes(app: FastifyInstance) {
                 console.warn('[OAuth] 获取用户邮箱失败');
             }
 
-            // 验证账号是否有 Antigravity 权限 (获取 projectId)
-            let projectId: string | undefined;
-            try {
-                const projectRes = await axios.post(
-                    'https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:loadCodeAssist',
-                    { metadata: { ideType: 'ANTIGRAVITY' } },
-                    {
-                        headers: {
-                            'Host': 'daily-cloudcode-pa.sandbox.googleapis.com',
-                            'Authorization': `Bearer ${access_token}`,
-                            'Content-Type': 'application/json',
-                            'User-Agent': 'antigravity/1.11.9 windows/amd64'
-                        }
+            if (!skip_validation) {
+                const testToken = {
+                    id: 0,
+                    access_token,
+                    refresh_token,
+                    expires_in: expires_in || 3599,
+                    timestamp: BigInt(Date.now()),
+                    project_id: null,
+                    session_id: generateSessionId()
+                };
+                const testMessages = [{ role: 'user', content: 'hi' }];
+                const testModel = ANTIGRAVITY_MODELS[0] || 'gemini-3-pro-preview';
+                try {
+                    await AntigravityService.generateResponse(
+                        testMessages,
+                        testModel,
+                        {},
+                        undefined,
+                        testToken as any
+                    );
+                } catch (e: any) {
+                    const msg = e.message || '';
+                    if (msg.includes('403')) {
+                        return reply.code(400).send({ error: '权限验证失败 (403)：该凭证无法调用 Antigravity 渠道模型。请确保账号已开通相关权限。' });
                     }
-                );
-                projectId = projectRes.data?.cloudaicompanionProject;
-                if (!projectId) {
-                    return reply.code(400).send({ error: '该账号没有 Antigravity 项目权限（未返回 projectId）。' });
+                    return reply.code(400).send({ error: '验证 Antigravity 权限失败: ' + msg });
                 }
-            } catch (e: any) {
-                console.error('[OAuth] ProjectId 验证失败:', e.response?.data || e.message);
-                const status = e.response?.status;
-                const err = e.response?.data?.error;
-                const message = err?.message || e.message;
-                if (status === 403) {
-                    const isNamedUser403 = err?.code === 403
-                        && err?.status === 'PERMISSION_DENIED'
-                        && typeof err?.message === 'string'
-                        && err.message.includes('You must be a named user on your organization');
-                    const outMsg = isNamedUser403
-                        ? '账号权限不足：此 Google 账号未获得 Gemini Code Assist 标准版授权，无法作为反重力凭证使用。请更换已开通权限的账号。'
-                        : '该账号无权使用 Antigravity（403）: ' + message;
-                    console.warn('[Antigravity] Credential upload permission denied (OAuth exchange):', e.response?.data || e.message);
-                    return reply.code(400).send({ error: outMsg });
-                }
-                return reply.code(400).send({ error: '验证 Antigravity 权限失败: ' + message });
             }
 
             // 保存 Token (绑定到当前用户)
@@ -525,11 +518,11 @@ export default async function antigravityAdminRoutes(app: FastifyInstance) {
                 refresh_token,
                 expires_in,
                 email,
-                projectId,
+                projectId: undefined,
                 ownerId: userId
             });
 
-            return { success: true, token: { id: token.id, email, projectId } };
+            return { success: true, token: { id: token.id, email, projectId: token.project_id } };
         } catch (e: any) {
             console.error('[OAuth] Token 交换失败:', e.response?.data || e.message);
             return reply.code(500).send({

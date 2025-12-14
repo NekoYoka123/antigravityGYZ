@@ -55,6 +55,9 @@
                   <span class="text-xs font-black text-indigo-400 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">#{{ cred.id }}</span>
                   <span class="text-sm font-bold text-gray-700 truncate max-w-[150px]" :title="cred.name">{{ cred.name }}</span>
                 </div>
+                <div v-if="cred.google_email" class="mt-1 text-[11px] text-gray-500 font-mono truncate max-w-[220px]">
+                  {{ cred.google_email }}
+                </div>
               </div>
             </td>
 
@@ -170,6 +173,7 @@ interface Credential {
   id: number;
   name: string;
   owner_email: string;
+  google_email?: string;
   status: string;
   fail_count: number;
   last_validated: string;
