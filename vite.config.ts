@@ -7,7 +7,13 @@ export default defineConfig({
   root: 'client', // Frontend source root
   build: {
     outDir: '../dist/public', // Build output to backend's public dir
-    emptyOutDir: true
+    emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'client/index.html'),
+        preview: path.resolve(__dirname, 'client/new-ui-preview.html')
+      }
+    }
   },
   server: {
     proxy: {

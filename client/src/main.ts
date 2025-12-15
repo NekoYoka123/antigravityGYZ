@@ -3,7 +3,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import { MotionPlugin } from '@vueuse/motion';
 import App from './App.vue';
 import LoginView from './views/LoginView.vue';
-import DashboardView from './views/DashboardView.vue';
+import NewDashboard from './views/NewDashboard.vue';
 
 // Router Setup
 const router = createRouter({
@@ -11,7 +11,7 @@ const router = createRouter({
   routes: [
     { path: '/', redirect: '/dashboard' },
     { path: '/login', component: LoginView },
-    { path: '/dashboard', component: DashboardView, meta: { requiresAuth: true } }
+    { path: '/dashboard', component: NewDashboard, meta: { requiresAuth: true } }
   ]
 });
 

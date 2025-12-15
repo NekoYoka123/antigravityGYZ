@@ -128,156 +128,140 @@ onMounted(fetchUsers);
 <template>
   <div class="space-y-4">
     <!-- Header & Search -->
-    <div class="flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
-        <h3 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+    <div class="flex flex-col md:flex-row justify-between items-center gap-4 bg-white/5 backdrop-blur-xl p-4 rounded-2xl border border-purple-500/30 shadow-[0_0_15px_rgba(139,92,246,0.1)]">
+        <h3 class="text-xl font-bold text-[#C4B5FD] flex items-center gap-2">
             <span>👥 用户管理</span>
-            <span class="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded-full border border-indigo-100">{{ pagination.total }}</span>
+            <span class="text-xs bg-white/10 text-white px-2 py-1 rounded-full border border-white/10">{{ pagination.total }}</span>
         </h3>
         <div class="relative w-full md:w-64">
-            <input 
-                v-model="search" 
+            <input
+                v-model="search"
                 @keyup.enter="handleSearch"
-                placeholder="🔍 搜索邮箱..." 
-                class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 pl-10 text-sm text-gray-800 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all placeholder-gray-400"
+                placeholder="🔍 搜索邮箱..."
+                class="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-2 pl-10 text-sm text-white focus:outline-none focus:border-[#8B5CF6] transition-all placeholder-[#A5B4FC]/50"
             >
-            <span class="absolute left-3 top-2.5 text-xs text-gray-400">🔎</span>
+            <span class="absolute left-3 top-2.5 text-xs text-[#A5B4FC]">🔎</span>
         </div>
     </div>
 
     <!-- Table -->
-    <div class="overflow-x-auto bg-white rounded-3xl border border-gray-200 shadow-sm">
+    <div class="overflow-x-auto bg-white/5 backdrop-blur-xl rounded-3xl border border-purple-500/30 shadow-[0_0_15px_rgba(139,92,246,0.1)]">
       <table class="w-full text-left border-collapse">
         <thead>
-          <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100 bg-gray-50/50">
-            <th class="p-6 font-bold">用户</th>
-            <th class="p-6 font-bold text-center">角色</th>
-            <th class="p-6 font-bold text-center">状态</th>
-            <th class="p-6 font-bold">今日用量 / 额度</th>
-            <th class="p-6 font-bold">反重力用量</th>
-            <th class="p-6 font-bold text-center">Discord ID</th>
-            <th class="p-6 font-bold text-center">Discord 头像</th>
-            <th class="p-6 font-bold text-center">Discord 名称</th>
-            <th class="p-6 font-bold text-center">公益站用户名</th>
-            <th class="p-6 font-bold text-right">操作</th>
+          <tr class="text-[#A5B4FC] text-xs uppercase tracking-wider border-b border-white/10 bg-white/5">
+            <th class="p-4 font-bold">用户</th>
+            <th class="p-4 font-bold text-center">状态</th>
+            <th class="p-4 font-bold">用量统计</th>
+            <th class="p-4 font-bold text-center">Discord</th>
+            <th class="p-4 font-bold text-right">操作</th>
           </tr>
         </thead>
-        <tbody class="text-sm divide-y divide-gray-100">
-          <tr v-for="user in users" :key="user.id" class="hover:bg-gray-50 transition-colors group">
+        <tbody class="text-sm divide-y divide-white/5">
+          <tr v-for="user in users" :key="user.id" class="hover:bg-white/5 transition-colors group hover:shadow-[0_0_15px_rgba(139,92,246,0.05)]">
             
             <!-- User Info -->
-            <td class="p-6">
+            <td class="p-4">
                 <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden shadow-sm border border-gray-200 shrink-0">
-                        <div class="w-full h-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold text-sm">
+                    <div class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center overflow-hidden shadow-sm border border-white/10 shrink-0">
+                        <div class="w-full h-full bg-gradient-to-br from-[#8B5CF6] to-[#4338CA] flex items-center justify-center text-white font-bold text-sm">
                             {{ user.email.charAt(0).toUpperCase() }}
                         </div>
                     </div>
                     <div>
-                        <div class="font-bold text-gray-800 flex items-center gap-2">
+                        <div class="font-bold text-white flex items-center gap-2">
                             {{ user.username || user.discordUsername || user.email }}
+                            
+                            <!-- Role Badge -->
+                            <div v-if="user.role === 'ADMIN'" class="group/role flex items-center">
+                                <div class="flex items-center bg-yellow-500/20 text-yellow-300 rounded-full border border-yellow-500/30 transition-all duration-300 h-5 px-1.5 gap-0 hover:gap-1 hover:pr-2 md:gap-1 md:pr-2 cursor-help">
+                                    <span class="text-[10px]">👑</span>
+                                    <span class="text-[10px] font-bold whitespace-nowrap max-w-0 group-hover/role:max-w-[50px] md:max-w-[50px] overflow-hidden transition-all duration-300 opacity-0 group-hover/role:opacity-100 md:opacity-100">ADMIN</span>
+                                </div>
+                            </div>
                         </div>
-                        <div class="text-xs text-gray-400 font-mono mt-0.5">ID: {{ user.id }} • {{ new Date(user.created_at).toLocaleDateString() }}</div>
+                        <div class="text-xs text-[#A5B4FC] font-mono mt-0.5 opacity-70">ID: {{ user.id }} • {{ new Date(user.created_at).toLocaleDateString() }}</div>
                     </div>
                 </div>
             </td>
 
-            <!-- Role -->
-            <td class="p-6 text-center">
-                <span v-if="user.role === 'ADMIN'" class="bg-yellow-50 text-yellow-700 px-3 py-1 rounded-full text-xs font-bold border border-yellow-200 shadow-sm">
-                    👑 ADMIN
-                </span>
-                <span v-else class="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-xs font-medium border border-gray-200">
-                    USER
-                </span>
-            </td>
 
             <!-- Status -->
-            <td class="p-6 text-center">
+            <td class="p-4 text-center">
                 <div class="flex justify-center">
-                    <span v-if="user.is_active" class="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 border border-emerald-200">
-                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> 正常
+                    <span v-if="user.is_active" class="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 border border-emerald-500/30">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> 正常
                     </span>
-                    <span v-else class="bg-rose-50 text-rose-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 border border-rose-200">
+                    <span v-else class="bg-rose-500/20 text-rose-400 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 border border-rose-500/30">
                         🚫 已禁用
                     </span>
                 </div>
             </td>
 
-            <!-- Usage -->
-            <td class="p-6 w-64">
-                <div class="flex flex-col gap-1">
-                    <div class="flex justify-between text-xs font-mono text-gray-500">
-                        <span>{{ user.today_used }}</span>
-                        <span>{{ user.daily_limit }}</span>
-                    </div>
-                    <div class="w-full bg-gray-100 h-2 rounded-full overflow-hidden border border-gray-100">
-                        <div 
-                            class="h-full rounded-full transition-all duration-500 shadow-sm"
-                            :class="user.today_used > user.daily_limit ? 'bg-rose-500' : 'bg-indigo-500'"
-                            :style="{ width: Math.min((user.today_used / (user.daily_limit || 1)) * 100, 100) + '%' }"
-                        ></div>
-                    </div>
-                </div>
-            </td>
-
-            <!-- Antigravity Usage -->
-            <td class="p-6 w-48">
-                <div class="flex flex-col gap-2">
-                    <!-- Claude -->
+            <!-- Usage (Combined) -->
+            <td class="p-4 w-80">
+                <div class="flex flex-col gap-3">
+                    <!-- Daily Usage -->
                     <div class="flex items-center gap-2 text-xs">
-                        <span class="w-12 text-gray-500 font-bold">C</span>
-                        <div class="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                             <div class="h-full bg-blue-500" :style="{ width: Math.min(((isTokenMode ? user.ag_claude_used_tokens : user.ag_claude_used_requests) / (isTokenMode ? user.ag_claude_token_limit : user.ag_claude_limit || 100)) * 100, 100) + '%' }"></div>
+                        <span class="w-12 text-[#A5B4FC] font-bold">今日</span>
+                        <div class="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                             <div class="h-full bg-gradient-to-r from-[#8B5CF6] to-[#4338CA]" :style="{ width: Math.min((user.today_used / (user.daily_limit || 1)) * 100, 100) + '%' }"></div>
                         </div>
-                        <span class="text-gray-600 font-mono text-[10px]">
-                            {{ formatNumber(isTokenMode ? user.ag_claude_used_tokens : user.ag_claude_used_requests) }} / 
-                            {{ formatNumber(isTokenMode ? user.ag_claude_token_limit : user.ag_claude_limit || 100) }}
+                        <span class="text-white font-mono text-[10px]">
+                            {{ user.today_used }} / {{ user.daily_limit }}
                         </span>
                     </div>
-                    <!-- Gemini 3 -->
+                    
+                    <!-- Antigravity Usage -->
                     <div class="flex items-center gap-2 text-xs">
-                        <span class="w-12 text-gray-500 font-bold">G3</span>
-                        <div class="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                             <div class="h-full bg-purple-500" :style="{ width: Math.min(((isTokenMode ? user.ag_gemini3_used_tokens : user.ag_gemini3_used_requests) / (isTokenMode ? user.ag_gemini3_token_limit : user.ag_gemini3_limit || 200)) * 100, 100) + '%' }"></div>
+                        <span class="w-12 text-[#A5B4FC] font-bold">反重力</span>
+                        <div class="flex flex-col gap-1 flex-1">
+                            <div class="flex items-center gap-1">
+                                <span class="text-[9px] text-blue-400 w-4">C</span>
+                                <div class="flex-1 h-1 bg-white/10 rounded-full overflow-hidden">
+                                    <div class="h-full bg-blue-400" :style="{ width: Math.min(((isTokenMode ? user.ag_claude_used_tokens : user.ag_claude_used_requests) / (isTokenMode ? user.ag_claude_token_limit : user.ag_claude_limit || 100)) * 100, 100) + '%' }"></div>
+                                </div>
+                                <span class="text-[9px] text-[#A5B4FC] font-mono">{{ formatNumber(isTokenMode ? user.ag_claude_used_tokens : user.ag_claude_used_requests) }}/{{ formatNumber(isTokenMode ? user.ag_claude_token_limit : user.ag_claude_limit || 100) }}</span>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <span class="text-[9px] text-purple-400 w-4">G3</span>
+                                <div class="flex-1 h-1 bg-white/10 rounded-full overflow-hidden">
+                                    <div class="h-full bg-purple-400" :style="{ width: Math.min(((isTokenMode ? user.ag_gemini3_used_tokens : user.ag_gemini3_used_requests) / (isTokenMode ? user.ag_gemini3_token_limit : user.ag_gemini3_limit || 200)) * 100, 100) + '%' }"></div>
+                                </div>
+                                <span class="text-[9px] text-[#A5B4FC] font-mono">{{ formatNumber(isTokenMode ? user.ag_gemini3_used_tokens : user.ag_gemini3_used_requests) }}/{{ formatNumber(isTokenMode ? user.ag_gemini3_token_limit : user.ag_gemini3_limit || 200) }}</span>
+                            </div>
                         </div>
-                        <span class="text-gray-600 font-mono text-[10px]">
-                            {{ formatNumber(isTokenMode ? user.ag_gemini3_used_tokens : user.ag_gemini3_used_requests) }} / 
-                            {{ formatNumber(isTokenMode ? user.ag_gemini3_token_limit : user.ag_gemini3_limit || 200) }}
-                        </span>
                     </div>
                 </div>
             </td>
             
-            <!-- Discord Info -->
-            <td class="p-6 text-center font-mono text-gray-600">
-              {{ user.discordId || '未绑定' }}
-            </td>
-            <td class="p-6 text-center">
-              <div class="w-8 h-8 rounded-full overflow-hidden border border-gray-200 mx-auto">
-                <img v-if="user.discordAvatar" :src="user.discordAvatar" class="w-full h-full object-cover" alt="Discord Avatar">
-                <span v-else class="text-xs text-gray-400">无</span>
-              </div>
-            </td>
-            <td class="p-6 text-center font-bold text-gray-800">
-              {{ user.discordUsername || '未绑定' }}
-            </td>
-            <td class="p-6 text-center font-bold text-gray-800">
-              {{ user.username || user.discordUsername || user.email }}
+            <!-- Discord Info (Combined) -->
+            <td class="p-4 text-center">
+                <div class="flex flex-col items-center gap-1" v-if="user.discordId">
+                    <div class="flex items-center gap-2">
+                        <div class="w-5 h-5 rounded-full overflow-hidden border border-white/20">
+                            <img v-if="user.discordAvatar" :src="user.discordAvatar" class="w-full h-full object-cover" alt="Avatar">
+                            <span v-else class="text-[8px] flex items-center justify-center h-full bg-white/10 text-white">?</span>
+                        </div>
+                        <span class="text-xs font-bold text-white">{{ user.discordUsername }}</span>
+                    </div>
+                    <span class="text-[10px] font-mono text-[#A5B4FC] opacity-60">{{ user.discordId }}</span>
+                </div>
+                <span v-else class="text-xs text-[#A5B4FC] opacity-50">未绑定</span>
             </td>
 
             <!-- Actions -->
-            <td class="p-6 text-right">
-                <div class="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button @click="openAgLimitModal(user)" title="反重力模型限额" class="w-8 h-8 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-600 flex items-center justify-center transition-colors border border-purple-100">
+            <td class="p-4 text-right">
+                <div class="flex items-center justify-end gap-2">
+                    <button @click="openAgLimitModal(user)" title="反重力模型限额" class="w-8 h-8 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 flex items-center justify-center transition-colors border border-purple-500/20">
                         🚀
                     </button>
-                    <button @click="openQuotaModal(user)" title="修改额度" class="w-8 h-8 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 flex items-center justify-center transition-colors border border-indigo-100">
+                    <button @click="openQuotaModal(user)" title="修改额度" class="w-8 h-8 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 flex items-center justify-center transition-colors border border-indigo-500/20">
                         ⚖️
                     </button>
-                    <button @click="openPasswordModal(user)" title="重置密码" class="w-8 h-8 rounded-lg bg-yellow-50 hover:bg-yellow-100 text-yellow-600 flex items-center justify-center transition-colors border border-yellow-100">
+                    <button @click="openPasswordModal(user)" title="重置密码" class="w-8 h-8 rounded-lg bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 flex items-center justify-center transition-colors border border-yellow-500/20">
                         🔑
                     </button>
-                    <button @click="toggleUserStatus(user)" :title="user.is_active ? '禁用' : '启用'" class="w-8 h-8 rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-600 flex items-center justify-center transition-colors text-lg border border-gray-200">
+                    <button @click="toggleUserStatus(user)" :title="user.is_active ? '禁用' : '启用'" class="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 text-[#A5B4FC] flex items-center justify-center transition-colors text-lg border border-white/10">
                         {{ user.is_active ? '🛑' : '✅' }}
                     </button>
                 </div>
@@ -290,18 +274,18 @@ onMounted(fetchUsers);
 
     <!-- Pagination -->
     <div class="flex justify-center mt-6 gap-2" v-if="pagination.total_pages > 1">
-        <button 
-            @click="pagination.page--" 
+        <button
+            @click="pagination.page--"
             :disabled="pagination.page === 1"
-            class="px-4 py-2 rounded-xl bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-sm font-bold text-gray-700 shadow-sm"
+            class="px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-sm font-bold text-[#C4B5FD] shadow-sm"
         >
             ← 上一页
         </button>
-        <span class="px-4 py-2 text-sm text-gray-500 font-mono">{{ pagination.page }} / {{ pagination.total_pages }}</span>
-        <button 
-            @click="pagination.page++" 
+        <span class="px-4 py-2 text-sm text-[#A5B4FC] font-mono">{{ pagination.page }} / {{ pagination.total_pages }}</span>
+        <button
+            @click="pagination.page++"
             :disabled="pagination.page === pagination.total_pages"
-            class="px-4 py-2 rounded-xl bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-sm font-bold text-gray-700 shadow-sm"
+            class="px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-sm font-bold text-[#C4B5FD] shadow-sm"
         >
             下一页 →
         </button>

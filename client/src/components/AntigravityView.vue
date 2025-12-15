@@ -27,7 +27,7 @@
       <!-- Usage Dashboard removed -->
 
       <!-- OAuth Card -->
-      <div class="glow-card bg-white/5 backdrop-blur-xl border border-purple-500/30 rounded-2xl md:rounded-3xl overflow-hidden transition-all duration-500 group">
+      <div id="oauth-card" class="glow-card bg-white/5 backdrop-blur-xl border border-purple-500/30 rounded-2xl md:rounded-3xl overflow-hidden transition-all duration-500 group">
         <div
           @click="isOAuthExpanded = !isOAuthExpanded"
           class="p-5 md:p-8 flex items-center justify-between cursor-pointer hover:bg-white/5 transition-colors"
@@ -377,10 +377,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { api } from '@/utils/api';
 
-const props = defineProps<{ isAdmin?: boolean }>();
+const props = defineProps<{ isAdmin?: boolean; initialExpandOAuth?: boolean }>();
 const isAdmin = computed(() => props.isAdmin ?? false);
 
 const oauthUrl = ref('');
@@ -393,6 +393,19 @@ const message = ref('');
 const messageType = ref<'success' | 'error'>('success');
 const skipValidation = ref(false);
 const isOAuthExpanded = ref(true);
+
+watch(() => props.initialExpandOAuth, (newVal) => {
+    if (newVal) {
+        isOAuthExpanded.value = true;
+        // Scroll to OAuth card
+        setTimeout(() => {
+            const el = document.getElementById('oauth-card');
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }, 100);
+    }
+});
 
 const uploadMode = ref<'oauth' | 'local'>('oauth');
 const fileInput = ref<HTMLInputElement | null>(null);
