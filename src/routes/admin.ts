@@ -363,10 +363,22 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   // 1. List Credentials (Pagination + Filter + Details)
   fastify.get('/api/admin/credentials', { preHandler: requireAdmin }, async (req: FastifyRequest) => {
-    const query = req.query as { page?: string, limit?: string, status?: string };
+    const query = req.query as { page?: string, limit?: string, status?: string, search?: string };
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 10;
     const statusFilter = query.status as CredentialStatus | 'ALL' | 'DUPLICATE';
+    const search = query.search || '';
+
+    // 构建搜索条件
+    const searchClause = search ? {
+      OR: [
+        { google_email: { contains: search, mode: 'insensitive' as const } },
+        { owner: { email: { contains: search, mode: 'insensitive' as const } } },
+        { owner: { username: { contains: search, mode: 'insensitive' as const } } },
+        { owner: { discordUsername: { contains: search, mode: 'insensitive' as const } } },
+        { owner: { discordId: { contains: search, mode: 'insensitive' as const } } }
+      ]
+    } : {};
 
     // 处理 DUPLICATE 筛选 - 查找重复邮箱
     if (statusFilter === 'DUPLICATE') {
@@ -388,12 +400,15 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         };
       }
 
+      const whereClause = {
+        google_email: { in: duplicateEmails },
+        ...searchClause
+      };
+
       const [total, credentials] = await prisma.$transaction([
-        prisma.googleCredential.count({
-          where: { google_email: { in: duplicateEmails } }
-        }),
+        prisma.googleCredential.count({ where: whereClause }),
         prisma.googleCredential.findMany({
-          where: { google_email: { in: duplicateEmails } },
+          where: whereClause,
           skip: (page - 1) * limit,
           take: limit,
           include: {
@@ -432,7 +447,8 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       };
     }
 
-    const whereClause = (statusFilter && statusFilter !== 'ALL') ? { status: statusFilter } : {};
+    const statusClause = (statusFilter && statusFilter !== 'ALL') ? { status: statusFilter } : {};
+    const whereClause = { ...statusClause, ...searchClause };
 
     const [total, credentials] = await prisma.$transaction([
       prisma.googleCredential.count({ where: whereClause }),
@@ -772,7 +788,13 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     const whereClause: any = {};
     if (search) {
-      whereClause.email = { contains: search, mode: 'insensitive' }; // Requires Prisma preview feature or appropriate DB collation, but works for basic contains
+      // 多字段搜索：用户名、邮箱、Discord用户名、Discord ID
+      whereClause.OR = [
+        { email: { contains: search, mode: 'insensitive' } },
+        { username: { contains: search, mode: 'insensitive' } },
+        { discordUsername: { contains: search, mode: 'insensitive' } },
+        { discordId: { contains: search, mode: 'insensitive' } }
+      ];
     }
     if (discordUnbound) {
       whereClause.discordId = null;

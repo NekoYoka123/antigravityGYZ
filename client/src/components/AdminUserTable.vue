@@ -137,7 +137,7 @@ onMounted(fetchUsers);
             <input
                 v-model="search"
                 @keyup.enter="handleSearch"
-                placeholder="🔍 搜索邮箱..."
+                placeholder="🔍 搜索用户名/邮箱/Discord..."
                 class="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-2 pl-10 text-sm text-white focus:outline-none focus:border-[#8B5CF6] transition-all placeholder-[#A5B4FC]/50"
             >
             <span class="absolute left-3 top-2.5 text-xs text-[#A5B4FC]">🔎</span>

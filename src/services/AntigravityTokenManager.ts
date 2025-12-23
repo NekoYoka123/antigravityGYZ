@@ -517,14 +517,15 @@ export class AntigravityTokenManager {
     }
 
     /**
-     * Get Token list with pagination, sorting, and optional status filter
+     * Get Token list with pagination, sorting, optional status filter and search
      */
     async getTokenList(
         page: number = 1,
         limit: number = 10,
         sortBy: string = 'id',
         order: 'asc' | 'desc' = 'asc',
-        status?: string
+        status?: string,
+        search?: string
     ): Promise<{ tokens: any[], total: number }> {
         const skip = (page - 1) * limit;
         const orderBy: any = {};
@@ -537,6 +538,17 @@ export class AntigravityTokenManager {
         }
 
         let whereClause: any = {};
+
+        // 构建搜索条件
+        const searchClause = search ? {
+            OR: [
+                { email: { contains: search, mode: 'insensitive' as const } },
+                { owner: { email: { contains: search, mode: 'insensitive' as const } } },
+                { owner: { username: { contains: search, mode: 'insensitive' as const } } },
+                { owner: { discordUsername: { contains: search, mode: 'insensitive' as const } } },
+                { owner: { discordId: { contains: search, mode: 'insensitive' as const } } }
+            ]
+        } : {};
 
         // Handle DUPLICATE filter - find emails that appear more than once
         if (status === 'DUPLICATE') {
@@ -553,7 +565,9 @@ export class AntigravityTokenManager {
                 return { tokens: [], total: 0 };
             }
 
-            whereClause = { email: { in: duplicateEmails } };
+            whereClause = { email: { in: duplicateEmails }, ...searchClause };
+        } else {
+            whereClause = { ...searchClause };
         }
 
         const [total, tokens] = await prisma.$transaction([

@@ -3,6 +3,16 @@
     <!-- Toolbar -->
     <div class="flex items-center justify-between bg-white/5 backdrop-blur-xl p-3 rounded-2xl border border-purple-500/30 shadow-[0_0_15px_rgba(139,92,246,0.1)]">
       <div class="flex items-center gap-4">
+        <!-- Search Input -->
+        <div class="relative w-40 md:w-56">
+          <input
+            v-model="search"
+            @keyup.enter="page=1; fetchCredentials()"
+            placeholder="🔍 搜索邮箱/用户名/Discord..."
+            class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 pl-8 text-xs text-white focus:outline-none focus:border-[#8B5CF6] transition-all placeholder-[#A5B4FC]/50"
+          >
+          <span class="absolute left-2.5 top-2 text-[10px] text-[#A5B4FC]">🔎</span>
+        </div>
         <!-- Filter Dropdown -->
         <div class="relative group">
           <select v-model="filterStatus" @change="page=1; fetchCredentials()"
@@ -198,6 +208,7 @@ interface Credential {
 const credentials = ref<Credential[]>([]);
 const page = ref(1);
 const filterStatus = ref('ALL');
+const search = ref('');
 const meta = reactive({ total: 0, total_pages: 1, limit: 10 });
 
 const fetchCredentials = async () => {
@@ -206,7 +217,8 @@ const fetchCredentials = async () => {
       params: {
         page: page.value,
         limit: 10,
-        status: filterStatus.value
+        status: filterStatus.value,
+        search: search.value || undefined
       }
     });
     credentials.value = res.data.data;

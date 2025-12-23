@@ -344,8 +344,9 @@ export default async function antigravityAdminRoutes(app: FastifyInstance) {
         const order = query.order === 'desc' ? 'desc' : 'asc';
         const status = query.status as string | undefined;
         const pool = query.pool as string | undefined;
+        const search = query.search as string | undefined;
 
-        const { tokens, total } = await antigravityTokenManager.getTokenList(page, limit, sortBy, order, status);
+        const { tokens, total } = await antigravityTokenManager.getTokenList(page, limit, sortBy, order, status, search);
 
         const baseStats = await antigravityTokenManager.getStats();
         const setting = await prisma.systemSetting.findUnique({ where: { key: 'SYSTEM_CONFIG' } });

@@ -311,6 +311,16 @@
               <span class="text-xl md:text-2xl">&#128203;</span> Token List
             </h3>
             <div class="flex items-center gap-2 flex-wrap">
+                <!-- Search Input -->
+                <div class="relative">
+                  <input
+                    v-model="tokenSearch"
+                    @keyup.enter="tokenPage=1; fetchTokens()"
+                    placeholder="🔍 搜索邮箱/用户名/Discord..."
+                    class="w-40 md:w-48 bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 pl-8 text-xs text-white focus:outline-none focus:border-purple-500 transition-all placeholder-purple-300/50"
+                  >
+                  <span class="absolute left-2.5 top-2 text-[10px] text-purple-300">🔎</span>
+                </div>
                 <!-- Filter Dropdown -->
                 <select v-model="tokenStatus" @change="tokenPage=1; fetchTokens()"
                     class="appearance-none bg-black/20 border border-white/10 pl-3 pr-8 py-1.5 text-purple-300 font-bold text-xs focus:outline-none focus:border-purple-500 cursor-pointer hover:bg-white/5 rounded-lg transition-all">
@@ -521,6 +531,7 @@ const tokenSortBy = ref('id');
 const tokenOrder = ref<'asc' | 'desc'>('asc');
 const tokenStatus = ref('');
 const poolFilter = ref('');
+const tokenSearch = ref('');
 
 const stats = ref({ total: 0, active: 0, inactive: 0, total_capacity: 0, personal_max_usage: 0 });
 const agOverview = ref<any | null>(null);
@@ -718,7 +729,8 @@ const fetchTokens = async () => {
             sort_by: tokenSortBy.value,
             order: tokenOrder.value,
             status: tokenStatus.value || undefined,
-            pool: poolFilter.value || undefined
+            pool: poolFilter.value || undefined,
+            search: tokenSearch.value || undefined
         }
     });
     tokens.value = res.data.tokens || [];
