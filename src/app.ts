@@ -78,6 +78,8 @@ async function bootstrap() {
     // Initialize Admin from Env
     const { admin } = getConfig();
     if (admin.username && admin.password) {
+      console.log(`[System] Initializing admin user from env: ${admin.username}`);
+      
       const existingAdmin = await prisma.user.findFirst({
         where: {
           OR: [
@@ -88,7 +90,7 @@ async function bootstrap() {
       });
 
       if (!existingAdmin) {
-        console.log(`[System] Creating admin user from env: ${admin.username}`);
+        console.log(`[System] Creating new admin user: ${admin.username}`);
         const hashedPassword = await bcrypt.hash(admin.password, 10);
         await prisma.user.create({
           data: {
@@ -96,21 +98,47 @@ async function bootstrap() {
             username: admin.username,
             password: hashedPassword,
             role: 'ADMIN',
-            daily_limit: 999999
+            daily_limit: 999999,
+            is_active: true
           }
         });
         console.log('[System] Admin user created successfully.');
       } else {
-        // Optional: Update password or role if exists?
-        // For now, just ensure role is ADMIN
-        if (existingAdmin.role !== 'ADMIN') {
-            console.log(`[System] Updating existing user ${admin.username} to ADMIN role.`);
-            await prisma.user.update({
-                where: { id: existingAdmin.id },
-                data: { role: 'ADMIN' }
-            });
+        console.log(`[System] Admin user already exists: ${existingAdmin.email}, role: ${existingAdmin.role}`);
+        
+        // 更新密码为env中设置的密码
+        const passwordMatches = await bcrypt.compare(admin.password, existingAdmin.password);
+        if (!passwordMatches) {
+          console.log(`[System] Updating admin password for user ${admin.username}`);
+          const hashedPassword = await bcrypt.hash(admin.password, 10);
+          await prisma.user.update({
+            where: { id: existingAdmin.id },
+            data: { password: hashedPassword }
+          });
         }
+        
+        // 确保角色是ADMIN
+        if (existingAdmin.role !== 'ADMIN') {
+          console.log(`[System] Updating user ${admin.username} to ADMIN role.`);
+          await prisma.user.update({
+            where: { id: existingAdmin.id },
+            data: { role: 'ADMIN' }
+          });
+        }
+        
+        // 确保用户是激活状态
+        if (!existingAdmin.is_active) {
+          console.log(`[System] Activating admin user ${admin.username}`);
+          await prisma.user.update({
+            where: { id: existingAdmin.id },
+            data: { is_active: true }
+          });
+        }
+        
+        console.log(`[System] Admin user ${admin.username} is ready with ADMIN role.`);
       }
+    } else {
+      console.log('[System] No admin credentials provided in env, skipping admin initialization.');
     }
 
     // Routes

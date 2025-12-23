@@ -4,13 +4,14 @@ import Redis from 'ioredis';
 import { z } from 'zod';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import { getConfig } from '../config/appConfig';
 
 const prisma = new PrismaClient();
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
 const POOL_KEY = 'GLOBAL_CREDENTIAL_POOL';
 const COOLING_SET_KEY = 'COOLING_SET'; // Using a Set for O(1) lookups
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
+const JWT_SECRET = getConfig().jwtSecret;
 
 // Types
 interface UserPayload {
