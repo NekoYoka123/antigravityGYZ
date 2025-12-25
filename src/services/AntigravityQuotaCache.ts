@@ -1,7 +1,8 @@
 import { AntigravityService } from './AntigravityService';
 import { AntigravityTokenData } from '../utils/antigravityUtils';
-import Redis from 'ioredis';
-import { PrismaClient } from '@prisma/client';
+import { redis } from '../utils/redis';
+import { calculateMedian, extractNumbersFromObjects, extractNumbersFromNestedData } from '../utils/arrayUtils';
+import { prisma } from '../utils/prisma';
 
 type PerModelQuota = {
   model_id: string;
@@ -22,15 +23,16 @@ type TokenQuotaSummary = {
 class AntigravityQuotaCache {
   private cache = new Map<number, TokenQuotaSummary>();
   private ttlMs = 15 * 60 * 1000;
-  private redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
-  private prisma = new PrismaClient();
+  // 使用共享 Redis 连接 (从 utils/redis 导入)
   private rateKey = 'AG_QCACHE_RATE';
   private fetchLockPrefix = 'AG_QCACHE_FETCH:';
   private cacheKeyPrefix = 'AG_QCACHE:';
+  // 预刷新队列 (避免重复触发)
+  private prefetchQueue = new Set<number>();
 
   private async getRateLimitPerMinute(): Promise<number> {
     try {
-      const setting = await this.prisma.systemSetting.findUnique({ where: { key: 'QUOTA_FETCH_RATE_PER_MINUTE' } });
+      const setting = await prisma.systemSetting.findUnique({ where: { key: 'QUOTA_FETCH_RATE_PER_MINUTE' } });
       const v = setting ? parseInt(setting.value || '0', 10) : 0;
       return v > 0 ? v : 120;
     } catch {
@@ -40,9 +42,9 @@ class AntigravityQuotaCache {
   private async withinRate(): Promise<boolean> {
     try {
       const limit = await this.getRateLimitPerMinute();
-      const n = await this.redis.incr(this.rateKey);
+      const n = await redis.incr(this.rateKey);
       if (n === 1) {
-        await this.redis.expire(this.rateKey, 60);
+        await redis.expire(this.rateKey, 60);
       }
       return n <= limit;
     } catch {
@@ -51,18 +53,18 @@ class AntigravityQuotaCache {
   }
   private async acquireFetchLock(tokenId: number, ttlMs: number): Promise<boolean> {
     try {
-      const ok = await this.redis.set(this.fetchLockPrefix + String(tokenId), '1', 'PX', ttlMs, 'NX');
+      const ok = await redis.set(this.fetchLockPrefix + String(tokenId), '1', 'PX', ttlMs, 'NX');
       return ok !== null;
     } catch {
       return false;
     }
   }
   private async releaseFetchLock(tokenId: number): Promise<void> {
-    try { await this.redis.del(this.fetchLockPrefix + String(tokenId)); } catch { }
+    try { await redis.del(this.fetchLockPrefix + String(tokenId)); } catch { }
   }
   private async readRedisCache(tokenId: number): Promise<TokenQuotaSummary | null> {
     try {
-      const raw = await this.redis.get(this.cacheKeyPrefix + String(tokenId));
+      const raw = await redis.get(this.cacheKeyPrefix + String(tokenId));
       if (!raw) return null;
       const obj = JSON.parse(raw);
       return obj as TokenQuotaSummary;
@@ -70,11 +72,105 @@ class AntigravityQuotaCache {
       return null;
     }
   }
+
+  /**
+   * 批量从 Redis 读取多个 Token 的配额缓存 (使用 MGET)
+   * @param tokenIds Token ID 数组
+   * @returns Map<tokenId, TokenQuotaSummary | null>
+   */
+  async readRedisCacheBatch(tokenIds: number[]): Promise<Map<number, TokenQuotaSummary | null>> {
+    const result = new Map<number, TokenQuotaSummary | null>();
+    if (tokenIds.length === 0) return result;
+
+    try {
+      const keys = tokenIds.map(id => this.cacheKeyPrefix + String(id));
+      const values = await redis.mget(...keys);
+      
+      for (let i = 0; i < tokenIds.length; i++) {
+        const raw = values[i];
+        if (raw) {
+          try {
+            const obj = JSON.parse(raw) as TokenQuotaSummary;
+            result.set(tokenIds[i], obj);
+            // 同时更新内存缓存
+            this.cache.set(tokenIds[i], obj);
+          } catch {
+            result.set(tokenIds[i], null);
+          }
+        } else {
+          result.set(tokenIds[i], null);
+        }
+      }
+    } catch (e) {
+      console.error('[QuotaCache] Batch read failed:', e);
+      // 降级为单个读取
+      for (const tokenId of tokenIds) {
+        result.set(tokenId, await this.readRedisCache(tokenId));
+      }
+    }
+    return result;
+  }
+
+  /**
+   * 批量获取配额信息 (优先内存缓存 -> Redis 批量读取)
+   * @param tokenIds Token ID 数组
+   * @returns Map<tokenId, TokenQuotaSummary | null>
+   */
+  async getBatch(tokenIds: number[]): Promise<Map<number, TokenQuotaSummary | null>> {
+    const result = new Map<number, TokenQuotaSummary | null>();
+    const missingIds: number[] = [];
+
+    // 1. 先检查内存缓存
+    for (const tokenId of tokenIds) {
+      const cached = this.get(tokenId);
+      if (cached) {
+        result.set(tokenId, cached);
+      } else {
+        missingIds.push(tokenId);
+      }
+    }
+
+    // 2. 批量从 Redis 获取缺失的
+    if (missingIds.length > 0) {
+      const redisResults = await this.readRedisCacheBatch(missingIds);
+      for (const [tokenId, summary] of redisResults) {
+        result.set(tokenId, summary);
+      }
+    }
+
+    return result;
+  }
+
   private async writeRedisCache(summary: TokenQuotaSummary): Promise<void> {
     try {
-      await this.redis.set(this.cacheKeyPrefix + String(summary.token_id), JSON.stringify(summary), 'PX', this.ttlMs);
+      await redis.set(this.cacheKeyPrefix + String(summary.token_id), JSON.stringify(summary), 'PX', this.ttlMs);
     } catch { }
   }
+
+  /**
+   * 触发预刷新 (当配额低于 10% 时后台刷新)
+   * @param token Token 数据
+   * @param currentRemaining 当前剩余配额 (0-1)
+   */
+  triggerPrefetch(token: AntigravityTokenData, currentRemaining: number | null): void {
+    // 如果剩余配额低于 10%，触发后台预刷新
+    if (currentRemaining !== null && currentRemaining <= 0.10 && !this.prefetchQueue.has(token.id)) {
+      this.prefetchQueue.add(token.id);
+      console.log(`[QuotaCache] Token #${token.id} quota low (${(currentRemaining * 100).toFixed(1)}%), triggering background prefetch`);
+      
+      // 异步刷新，不阻塞主流程
+      setImmediate(async () => {
+        try {
+          await this.refreshToken(token);
+        } catch (e) {
+          console.error(`[QuotaCache] Prefetch failed for token #${token.id}:`, e);
+        } finally {
+          this.prefetchQueue.delete(token.id);
+        }
+      });
+    }
+  }
+
   async refreshToken(token: AntigravityTokenData): Promise<TokenQuotaSummary | null> {
     const locked = await this.acquireFetchLock(token.id, 15000); // Reduced lock time for faster concurrent refresh
     if (!locked) {
@@ -103,102 +199,101 @@ class AntigravityQuotaCache {
       reset_time: q?.resetTime || null,
       window_seconds: typeof q?.windowSeconds === 'number' ? q.windowSeconds : null
     }));
+    
+    // 使用工具函数提取和计算
     const vals = per.map(p => p.remaining).filter((v): v is number => typeof v === 'number');
     const remaining = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
-    const hoursFromReset = per
-      .map(p => p.reset_time ? Math.max(0, (new Date(p.reset_time).getTime() - now) / 3600000) : null)
-      .filter((v): v is number => typeof v === 'number');
+    
+    // 从 reset_time 提取小时数
+    const hoursFromReset = extractNumbersFromObjects(per, p => 
+      p.reset_time ? Math.max(0, (new Date(p.reset_time).getTime() - now) / 3600000) : null
+    );
+    
     // 如果没有 reset_time，则尝试读取窗口秒数（从原始数据）
     let hoursList = hoursFromReset;
     if (hoursList.length === 0) {
-      const secondsList = Object.values(data || {}).map((q: any) => typeof q?.windowSeconds === 'number' ? q.windowSeconds : null)
-        .filter((v): v is number => typeof v === 'number');
+      const secondsList = extractNumbersFromNestedData(data || {}, 'windowSeconds');
       hoursList = secondsList.map(s => s / 3600);
     }
-    let medianHours: number | null = null;
-    if (hoursList.length > 0) {
-      const sorted = [...hoursList].sort((a, b) => a - b);
-      const mid = Math.floor(sorted.length / 2);
-      medianHours = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-    }
+    
+    // 使用工具函数计算中位数
+    const medianHours = calculateMedian(hoursList);
 
     // Classification Logic with Persistence to prevent drift
     let classification: 'Normal' | 'Pro' | null = null;
 
     // 1. Get persistent classification from Redis FIRST
     const classKey = `AG_CLASS:${token.id}`;
-    const persistentClass = await this.redis.get(classKey) as 'Normal' | 'Pro' | null;
+    const persistentClass = await redis.get(classKey) as 'Normal' | 'Pro' | null;
 
     // 2. Try to use explicit windowSeconds (Cycle Duration) - most reliable source
     let cycleHours: number | null = null;
-    const windowSecondsList = Object.values(data || {}).map((q: any) => typeof q?.windowSeconds === 'number' ? q.windowSeconds : null)
-      .filter((v): v is number => typeof v === 'number');
+    const windowSecondsList = extractNumbersFromNestedData(data || {}, 'windowSeconds');
 
     if (windowSecondsList.length > 0) {
-      const sorted = [...windowSecondsList].sort((a, b) => a - b);
-      const mid = Math.floor(sorted.length / 2);
-      const medianSeconds = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-      cycleHours = medianSeconds / 3600;
+      const medianSeconds = calculateMedian(windowSecondsList);
+      cycleHours = medianSeconds ? medianSeconds / 3600 : null;
     }
 
     // 3. Determine classification based on available data
     if (cycleHours !== null) {
-      // Strategy A: Use explicit window duration (most reliable)
-      // User Requirement:
-      //   - cycleHours <= 5h => Pro
-      //   - 5h < cycleHours <= 168h (1 week) => Normal
-      //   - cycleHours > 168h => Abnormal, default to Pro for safety
-      let newClass: 'Normal' | 'Pro';
-      if (cycleHours <= 5) {
-        newClass = 'Pro';
-      } else if (cycleHours <= 168) {
-        newClass = 'Normal';
-      } else {
-        newClass = 'Pro';
-      }
-
-      // CRITICAL: Only update classification if:
-      // a) No previous classification exists (new token), OR
-      // b) Window duration is in a "confident" range (clearly Pro or clearly Normal)
-      const clearlyPro = cycleHours <= 4; // Clearly a 5h cycle (with some buffer)
-      const clearlyNormal = cycleHours >= 24; // Clearly a 7-day cycle (at least 1 day)
-
-      if (!persistentClass) {
-        // New token - save classification
-        classification = newClass;
-        await this.redis.set(classKey, classification, 'EX', 7 * 86400);
-      } else if (clearlyPro || clearlyNormal) {
-        // Only update if we're confident about the classification
-        if (newClass !== persistentClass) {
-          console.log(`[QuotaCache] Token ${token.id} classification changing from ${persistentClass} to ${newClass} (cycleHours=${cycleHours.toFixed(1)})`);
-        }
-        classification = newClass;
-        await this.redis.set(classKey, classification, 'EX', 7 * 86400);
-      } else {
-        // Ambiguous zone (4h < cycleHours < 24h) - keep persistent classification
-        classification = persistentClass;
-      }
-    } else {
-      // Strategy B: No explicit window data - use persistence or heuristic
-      if (persistentClass) {
-        // ALWAYS prefer persistent classification when no window data
-        classification = persistentClass;
-      } else if (medianHours !== null) {
-        // First time seeing this token, use remaining time as heuristic
-        // Be conservative: only classify as Normal if clearly long cycle
-        if (medianHours >= 24) {
-          classification = 'Normal';
-          await this.redis.set(classKey, 'Normal', 'EX', 7 * 86400);
+        // Strategy A: Use explicit window duration (most reliable)
+        // User Requirement:
+        //   - cycleHours <= 5h => Pro
+        //   - 5h < cycleHours <= 168h (1 week) => Normal
+        //   - cycleHours > 168h => Abnormal, default to Pro for safety
+        let newClass: 'Normal' | 'Pro';
+        if (cycleHours <= 5) {
+            newClass = 'Pro';
+        } else if (cycleHours <= 168) {
+            newClass = 'Normal';
         } else {
-          // Default to Pro for short/ambiguous remaining time
-          classification = 'Pro';
-          await this.redis.set(classKey, 'Pro', 'EX', 7 * 86400);
+            newClass = 'Pro';
         }
-      } else {
-        // Last resort: local Memory cache
-        const previousLocal = this.cache.get(token.id);
-        classification = previousLocal?.classification || null;
-      }
+
+        // CRITICAL: Only update classification if:
+        // a) No previous classification exists (new token), OR
+        // b) Window duration is in a "confident" range (clearly Pro or clearly Normal)
+        const clearlyPro = cycleHours <= 4; // Clearly a 5h cycle (with some buffer)
+        const clearlyNormal = cycleHours >= 24; // Clearly a 7-day cycle (at least 1 day)
+
+        if (!persistentClass) {
+            // New token - save classification
+            classification = newClass;
+        } else if (clearlyPro || clearlyNormal) {
+            // Only update if we're confident about the classification
+            if (newClass !== persistentClass) {
+                console.log(`[QuotaCache] Token ${token.id} classification changing from ${persistentClass} to ${newClass} (cycleHours=${cycleHours.toFixed(1)})`);
+            }
+            classification = newClass;
+        } else {
+            // Ambiguous zone (4h < cycleHours < 24h) - keep persistent classification
+            classification = persistentClass;
+        }
+    } else {
+        // Strategy B: No explicit window data - use persistence or heuristic
+        if (persistentClass) {
+            // ALWAYS prefer persistent classification when no window data
+            classification = persistentClass;
+        } else if (medianHours !== null) {
+            // First time seeing this token, use remaining time as heuristic
+            // Be conservative: only classify as Normal if clearly long cycle
+            if (medianHours >= 24) {
+                classification = 'Normal';
+            } else {
+                // Default to Pro for short/ambiguous remaining time
+                classification = 'Pro';
+            }
+        } else {
+            // Last resort: local Memory cache
+            const previousLocal = this.cache.get(token.id);
+            classification = previousLocal?.classification || null;
+        }
+    }
+    
+    // 如果需要保存分类，使用流水线操作
+    if (classification && (!persistentClass || classification !== persistentClass)) {
+        await redis.set(classKey, classification, 'EX', 7 * 86400);
     }
     const summary: TokenQuotaSummary = {
       token_id: token.id,

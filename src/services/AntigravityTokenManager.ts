@@ -1,28 +1,36 @@
+/**
+ * 反重力令牌管理器
+ * 使用数据库存储，支持令牌轮换、刷新和状态管理
+ */
 import { PrismaClient, AntigravityTokenStatus, AntigravityToken } from '@prisma/client';
 import axios from 'axios';
 import { ANTIGRAVITY_CONFIG } from '../config/antigravityConfig';
 import { generateProjectId, generateSessionId, AntigravityTokenData } from '../utils/antigravityUtils';
 import { antigravityQuotaCache } from './AntigravityQuotaCache';
-import Redis from 'ioredis';
+import { redis } from '../utils/redis';
 
 const prisma = new PrismaClient();
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
-const AG_LOCK_PREFIX = 'CRED_LOCK:AG:';
+const AG_LOCK_PREFIX = 'CRED_LOCK:AG:'; // 反重力凭证锁的 Redis 键前缀
 
 /**
- * Antigravity Token Manager
- * Uses database storage, supports Token rotation, refresh, and status management
+ * 反重力令牌管理器类
+ * 使用数据库存储，支持令牌轮换、刷新和状态管理
  */
 export class AntigravityTokenManager {
     private currentIndex: number = 0;
     private refreshLocks: Map<number, Promise<boolean>> = new Map();
 
+    /**
+     * 构造函数
+     * 初始化数据库表（如果不存在）
+     */
     constructor() {
         this.initializeDatabase();
     }
 
     /**
-     * Initialize database table if not exists
+     * 初始化数据库表（如果不存在）
+     * 创建必要的枚举类型和表结构
      */
     private async initializeDatabase() {
         try {
@@ -75,7 +83,9 @@ export class AntigravityTokenManager {
     }
 
     /**
-     * Check if Token is expired
+     * 检查令牌是否已过期
+     * @param token 反重力令牌对象
+     * @returns 是否已过期
      */
     private isExpired(token: AntigravityToken): boolean {
         if (!token.timestamp || !token.expires_in) return true;
@@ -84,7 +94,9 @@ export class AntigravityTokenManager {
     }
 
     /**
-     * Refresh Token
+     * 刷新令牌
+     * @param tokenId 令牌 ID
+     * @returns 刷新是否成功
      */
     async refreshToken(tokenId: number): Promise<boolean> {
         // Prevent concurrent refresh
@@ -190,7 +202,11 @@ export class AntigravityTokenManager {
     }
 
     /**
-     * Get available Token (优化轮询：优先选择最久未使用的 Token)
+     * 获取可用的反重力令牌（优化轮询：优先选择最久未使用的令牌）
+     * @param opts 选项对象，包含分组和模型 ID
+     * @param userId 用户 ID（可选，用于加锁）
+     * @param ttlMs 锁的过期时间（毫秒）
+     * @returns 反重力令牌数据，或 null（如果没有可用令牌）
      */
     async getToken(opts?: { group?: 'claude' | 'gemini3', modelId?: string }, userId?: number, ttlMs: number = 30000): Promise<AntigravityTokenData | null> {
         const now = new Date();
@@ -215,13 +231,20 @@ export class AntigravityTokenManager {
             return null;
         }
 
-        const withQuota = await Promise.all(tokens.map(async t => {
-            const cached = antigravityQuotaCache.get(t.id);
-            if (cached) return { t, q: cached };
-            const fromRedis = await antigravityQuotaCache.getFromRedis(t.id);
-            if (fromRedis) return { t, q: fromRedis };
-            return { t, q: null };
-        }));
+        // 优化: 使用批量读取代替逐个查询
+        const tokenIds = tokens.map(t => t.id);
+        const quotaMap = await antigravityQuotaCache.getBatch(tokenIds);
+        
+        const withQuota = tokens.map(t => {
+            const q = quotaMap.get(t.id) || null;
+            
+            // 触发预刷新: 如果配额低于 10%，后台刷新
+            if (q && q.remaining !== null && q.remaining <= 0.10) {
+                antigravityQuotaCache.triggerPrefetch(this.toTokenData(t), q.remaining);
+            }
+            
+            return { t, q };
+        });
         const filteredByModel = withQuota.filter(x => {
             if (!opts?.modelId) return true;
             const pm = x.q?.per_model || [];
@@ -359,6 +382,13 @@ export class AntigravityTokenManager {
         return null;
     }
 
+    /**
+     * 获取反重力令牌锁
+     * @param tokenId 令牌 ID
+     * @param userId 用户 ID
+     * @param ttlMs 锁的过期时间（毫秒）
+     * @returns 是否成功获取锁
+     */
     async acquireLock(tokenId: number, userId: number, ttlMs: number = 30000): Promise<boolean> {
         const key = `${AG_LOCK_PREFIX}${tokenId}`;
         const holder = await redis.get(key);
@@ -371,6 +401,11 @@ export class AntigravityTokenManager {
         return ok !== null;
     }
 
+    /**
+     * 释放反重力令牌锁
+     * @param tokenId 令牌 ID
+     * @param userId 用户 ID
+     */
     async releaseLock(tokenId: number, userId: number): Promise<void> {
         const key = `${AG_LOCK_PREFIX}${tokenId}`;
         const holder = await redis.get(key);
@@ -379,6 +414,10 @@ export class AntigravityTokenManager {
         }
     }
 
+    /**
+     * 刷新所有活跃令牌
+     * 刷新所有启用状态且处于 ACTIVE 或 COOLING 状态的令牌
+     */
     async refreshAllActiveTokens(): Promise<void> {
         const tokens = await prisma.antigravityToken.findMany({
             where: { is_enabled: true, status: { in: [AntigravityTokenStatus.ACTIVE, AntigravityTokenStatus.COOLING] } },
@@ -392,7 +431,8 @@ export class AntigravityTokenManager {
     }
 
     /**
-     * Check cooling tokens
+     * 检查冷却中的令牌
+     * 将已过冷却期的令牌恢复为 ACTIVE 状态
      */
     private async checkCoolingTokens(): Promise<void> {
         await prisma.antigravityToken.updateMany({
@@ -408,10 +448,12 @@ export class AntigravityTokenManager {
     }
 
     /**
-     * Mark Token as cooling (设置 COOLING 状态和冷却时间)
+     * 将令牌标记为冷却状态
+     * @param tokenId 令牌 ID
+     * @param cooldownMs 冷却时间（毫秒），默认 60 秒
      */
     async markAsCooling(tokenId: number, cooldownMs: number = 60000): Promise<void> {
-        console.log(`[AntigravityTokenManager] Token #${tokenId} entering cooldown for ${cooldownMs}ms`);
+        console.log(`[AntigravityTokenManager] Token #${tokenId} 进入冷却状态，冷却时间 ${cooldownMs}ms`);
         await prisma.antigravityToken.update({
             where: { id: tokenId },
             data: {
@@ -422,18 +464,25 @@ export class AntigravityTokenManager {
     }
 
     /**
-     * Mark Token as dead
+     * 将令牌标记为死亡状态
+     * @param tokenId 令牌 ID
      */
     async markAsDead(tokenId: number): Promise<void> {
-        console.log(`[AntigravityTokenManager] Token #${tokenId} marked as dead`);
+        console.log(`[AntigravityTokenManager] Token #${tokenId} 被标记为死亡状态`);
         await prisma.antigravityToken.update({
             where: { id: tokenId },
-            data: { status: AntigravityTokenStatus.DEAD, is_enabled: false }
+            data: {
+                status: AntigravityTokenStatus.DEAD,
+                is_enabled: false
+            }
         });
     }
 
     /**
-     * Add new Token (同一邮箱只能有一个凭证)
+     * 添加新的反重力令牌
+     * 同一邮箱只能有一个凭证，避免重复上传
+     * @param data 令牌数据
+     * @returns 创建的反重力令牌
      */
     async addToken(data: {
         access_token: string;
@@ -476,7 +525,10 @@ export class AntigravityTokenManager {
     }
 
     /**
-     * Check if user has uploaded any Antigravity token (and thus has access to the pool)
+     * 检查用户是否有权访问反重力池
+     * 通过检查用户是否上传过任何反重力令牌来判断
+     * @param userId 用户 ID
+     * @returns 是否有权限访问反重力池
      */
     async hasAntigravityAccess(userId: number): Promise<boolean> {
         const count = await prisma.antigravityToken.count({
@@ -486,14 +538,18 @@ export class AntigravityTokenManager {
     }
 
     /**
-     * Delete Token
+     * 删除反重力令牌
+     * @param tokenId 令牌 ID
      */
     async deleteToken(tokenId: number): Promise<void> {
         await prisma.antigravityToken.delete({ where: { id: tokenId } });
     }
 
     /**
-     * Update Token status
+     * 更新反重力令牌状态
+     * @param tokenId 令牌 ID
+     * @param data 更新数据，目前仅支持 is_enabled 字段
+     * @returns 更新后的反重力令牌
      */
     async updateToken(tokenId: number, data: { is_enabled?: boolean }): Promise<AntigravityToken> {
         return prisma.antigravityToken.update({
@@ -503,7 +559,8 @@ export class AntigravityTokenManager {
     }
 
     /**
-     * Get all tokens (internal use)
+     * 获取所有反重力令牌（内部使用）
+     * @returns 令牌列表，仅包含 id、refresh_token 和 is_enabled 字段
      */
     async getAllTokens(): Promise<any[]> {
         const tokens = await prisma.antigravityToken.findMany({
@@ -517,7 +574,14 @@ export class AntigravityTokenManager {
     }
 
     /**
-     * Get Token list with pagination, sorting, optional status filter and search
+     * 获取令牌列表，支持分页、排序、状态筛选和搜索
+     * @param page 页码
+     * @param limit 每页数量
+     * @param sortBy 排序字段
+     * @param order 排序顺序
+     * @param status 状态筛选
+     * @param search 搜索关键词
+     * @returns 包含令牌列表和总数的对象
      */
     async getTokenList(
         page: number = 1,
@@ -615,7 +679,9 @@ export class AntigravityTokenManager {
     }
 
     /**
-     * Get Token list by owner
+     * 获取指定所有者的令牌列表
+     * @param ownerId 所有者 ID
+     * @returns 令牌列表
      */
     async getTokenListByOwner(ownerId: number): Promise<any[]> {
         const tokens = await prisma.antigravityToken.findMany({
@@ -633,7 +699,8 @@ export class AntigravityTokenManager {
     }
 
     /**
-     * Get statistics
+     * 获取反重力令牌统计信息
+     * @returns 包含总数、活跃数、冷却数和死亡数的对象
      */
     async getStats(): Promise<{ total: number; active: number; cooling: number; dead: number }> {
         const [total, active, cooling, dead] = await Promise.all([
@@ -645,6 +712,11 @@ export class AntigravityTokenManager {
         return { total, active, cooling, dead };
     }
 
+    /**
+     * 将 AntigravityToken 对象转换为 AntigravityTokenData 格式
+     * @param token AntigravityToken 对象
+     * @returns AntigravityTokenData 对象
+     */
     private toTokenData(token: AntigravityToken): AntigravityTokenData {
         return {
             id: token.id,

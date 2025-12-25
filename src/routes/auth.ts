@@ -1,3 +1,7 @@
+/**
+ * 认证路由模块
+ * 提供用户注册、登录、Discord OAuth 集成、密码修改等功能
+ */
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
@@ -10,23 +14,26 @@ import { getConfig } from '../config/appConfig';
 const prisma = new PrismaClient();
 const JWT_SECRET = getConfig().jwtSecret;
 
+// 登录验证模式
 const AuthSchema = z.object({
-  username: z.string().min(2),
-  password: z.string().min(6),
+  username: z.string().min(2), // 用户名或邮箱
+  password: z.string().min(6), // 密码
 });
 
+// 注册验证模式
 const RegisterSchema = z.object({
-  username: z.string().min(2).max(64),
-  password: z.string().min(6).max(128),
-  confirmPassword: z.string().min(6).max(128),
+  username: z.string().min(2).max(64), // 用户名
+  password: z.string().min(6).max(128), // 密码
+  confirmPassword: z.string().min(6).max(128), // 确认密码
 }).refine(data => data.password === data.confirmPassword, {
   message: '两次密码不一致',
   path: ['confirmPassword']
 });
 
+// 密码修改验证模式
 const ChangePasswordSchema = z.object({
-  oldPassword: z.string(),
-  newPassword: z.string().min(6),
+  oldPassword: z.string(), // 旧密码
+  newPassword: z.string().min(6), // 新密码
 });
 
 export default async function authRoutes(fastify: FastifyInstance) {

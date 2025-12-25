@@ -16,7 +16,7 @@ const router = createRouter({
 });
 
 // Auth Guard
-router.beforeEach((to, from, next) => {
+router.beforeEach((to, _from, next) => {
   const token = localStorage.getItem('token');
   if (to.meta.requiresAuth && !token) {
     next('/login');

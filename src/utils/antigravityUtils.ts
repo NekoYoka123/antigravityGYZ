@@ -1,6 +1,14 @@
+/**
+ * 反重力工具函数集
+ * 提供各种辅助功能，如 ID 生成、消息转换、模型映射等
+ */
 import { randomUUID } from 'crypto';
 import { ANTIGRAVITY_CONFIG } from '../config/antigravityConfig';
 
+/**
+ * 生成随机项目 ID
+ * @returns 生成的项目 ID，格式为 形容词-名词-随机字符串
+ */
 export function generateProjectId(): string {
     const adjectives = ['useful', 'bright', 'swift', 'calm', 'bold'];
     const nouns = ['fuze', 'wave', 'spark', 'flow', 'core'];
@@ -10,28 +18,48 @@ export function generateProjectId(): string {
     return randomAdj + '-' + randomNoun + '-' + randomNum;
 }
 
+/**
+ * 生成会话 ID
+ * @returns 生成的会话 ID，格式为负随机数
+ */
 export function generateSessionId(): string {
     return String(-Math.floor(Math.random() * 9e18));
 }
 
+/**
+ * 生成请求 ID
+ * @returns 生成的请求 ID，格式为 agent-随机 UUID
+ */
 export function generateRequestId(): string {
     return 'agent-' + randomUUID();
 }
 
+/**
+ * 生成工具调用 ID
+ * @returns 生成的工具调用 ID，格式为 call-随机 UUID（移除了连字符）
+ */
 export function generateToolCallId(): string {
     return 'call_' + randomUUID().replace(/-/g, '');
 }
 
+/**
+ * 反重力令牌数据接口
+ */
 export interface AntigravityTokenData {
-    id: number;
-    access_token: string;
-    refresh_token: string;
-    expires_in: number;
-    timestamp: bigint;
-    project_id: string | null;
-    session_id: string | null;
+    id: number; // 令牌 ID
+    access_token: string; // 访问令牌
+    refresh_token: string; // 刷新令牌
+    expires_in: number; // 令牌有效期（秒）
+    timestamp: bigint; // 令牌创建时间戳
+    project_id: string | null; // 项目 ID
+    session_id: string | null; // 会话 ID
 }
 
+/**
+ * 从内容中提取文本和图片
+ * @param content 输入内容，可以是字符串或包含文本和图片的数组
+ * @returns 包含提取的文本和图片的对象
+ */
 export function extractImagesFromContent(content: any): { text: string; images: any[] } {
     const result: { text: string; images: any[] } = { text: '', images: [] };
     if (typeof content === 'string') {
@@ -54,6 +82,16 @@ export function extractImagesFromContent(content: any): { text: string; images: 
     return result;
 }
 
+/**
+ * 将标准格式的消息转换为反重力 API 所需的格式
+ * @param messages 标准格式的消息数组，包含 user、assistant、system 和 tool 角色
+ * @returns 转换后的反重力 API 消息格式
+ */
+/**
+ * 将 OpenAI 格式的消息转换为反重力格式
+ * @param messages OpenAI 格式的消息数组
+ * @returns 反重力格式的消息数组
+ */
 export function convertMessagesToAntigravity(messages: any[]): any[] {
     const antigravityMessages: any[] = [];
     for (const message of messages) {

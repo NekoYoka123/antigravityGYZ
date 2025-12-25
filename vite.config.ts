@@ -10,8 +10,7 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: {
-        main: path.resolve(__dirname, 'client/index.html'),
-        preview: path.resolve(__dirname, 'client/new-ui-preview.html')
+        main: path.resolve(__dirname, 'client/index.html')
       }
     }
   },

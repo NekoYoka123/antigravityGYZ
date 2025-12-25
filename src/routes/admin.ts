@@ -1,12 +1,15 @@
+/**
+ * 管理员路由模块
+ * 提供管理员相关的 API 接口，包括用户管理、凭证管理、系统设置等
+ */
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { PrismaClient, Role, CredentialStatus, ApiKeyType } from '@prisma/client';
-import Redis from 'ioredis';
 import { z } from 'zod';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import { redis } from '../utils/redis';
 
 const prisma = new PrismaClient();
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
 const POOL_KEY = 'GLOBAL_CREDENTIAL_POOL';
 const COOLING_SET_KEY = 'COOLING_SET'; // Using a Set for O(1) lookups
@@ -130,15 +133,57 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     }
     const forceBindSetting = await prisma.systemSetting.findUnique({ where: { key: 'FORCE_DISCORD_BIND' } });
 
-    // Dynamic Quota Calculation
+    // 动态配额计算
+    // 辅助函数：从新嵌套格式或旧数字格式中提取配额值
+    const getQuotaValue = (levelConfig: any, defaultValue: number): { base: { flash: number; pro: number; v3: number }, increment: { flash: number; pro: number; v3: number } } => {
+      if (typeof levelConfig === 'number') {
+        // 旧格式：单一数字，按比例分配给各模型
+        return { base: { flash: levelConfig, pro: Math.floor(levelConfig / 4), v3: Math.floor(levelConfig / 4) }, increment: { flash: 0, pro: 0, v3: 0 } };
+      }
+      if (levelConfig && typeof levelConfig === 'object' && levelConfig.base) {
+        // 新嵌套格式
+        return {
+          base: {
+            flash: levelConfig.base?.flash ?? defaultValue,
+            pro: levelConfig.base?.pro ?? Math.floor(defaultValue / 4),
+            v3: levelConfig.base?.v3 ?? Math.floor(defaultValue / 4)
+          },
+          increment: {
+            flash: levelConfig.increment?.flash ?? 0,
+            pro: levelConfig.increment?.pro ?? 0,
+            v3: levelConfig.increment?.v3 ?? 0
+          }
+        };
+      }
+      // 默认值
+      return { base: { flash: defaultValue, pro: Math.floor(defaultValue / 4), v3: Math.floor(defaultValue / 4) }, increment: { flash: 0, pro: 0, v3: 0 } };
+    };
+
     const activeCredCount = user._count.credentials;
     const quotaConf = systemConfig.quota || {};
-    let baseQuota = quotaConf.newbie ?? 300;
-    if (v3Count > 0) baseQuota = quotaConf.v3_contributor ?? 3000;
-    else if (activeCredCount > 0) baseQuota = quotaConf.contributor ?? 1500;
-    const inc = quotaConf.increment_per_credential ?? 1000;
-    const extra = Math.max(0, activeCredCount - 1) * inc;
-    const totalQuota = baseQuota + extra;
+    
+    // 根据用户等级获取配额配置
+    let levelQuota: { base: { flash: number; pro: number; v3: number }, increment: { flash: number; pro: number; v3: number } };
+    if (v3Count > 0) {
+      levelQuota = getQuotaValue(quotaConf.v3_contributor, 3000);
+    } else if (activeCredCount > 0) {
+      levelQuota = getQuotaValue(quotaConf.contributor, 1500);
+    } else {
+      levelQuota = getQuotaValue(quotaConf.newbie, 300);
+    }
+    
+    // 计算每个模型的总配额（基础配额 + 每个额外凭证的增量）
+    const additionalCreds = Math.max(0, activeCredCount - 1);
+    const flashQuota = levelQuota.base.flash + additionalCreds * levelQuota.increment.flash;
+    const proQuota = levelQuota.base.pro + additionalCreds * levelQuota.increment.pro;
+    const v3Quota = levelQuota.base.v3 + additionalCreds * levelQuota.increment.v3;
+    
+    // 同时支持旧的 increment_per_credential 字段以向后兼容
+    const legacyInc = quotaConf.increment_per_credential ?? 0;
+    const legacyExtra = additionalCreds * legacyInc;
+    
+    // 总配额：所有模型配额之和 + 旧版增量
+    const totalQuota = flashQuota + proQuota + v3Quota + legacyExtra;
 
     // Fetch Redis Model Stats (使用 UTC+8 时区，与 today_used 重置时间一致)
     const now = new Date();
@@ -244,6 +289,15 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       time: a.created_at
     }));
 
+    // Calculate user's rate limit based on credentials
+    const rateLimits = systemConfig.rate_limit || {};
+    let userRateLimit = rateLimits.newbie ?? 10;
+    if (v3Count > 0) userRateLimit = rateLimits.v3_contributor ?? 120;
+    else if (activeCredCount > 0) userRateLimit = rateLimits.contributor ?? 60;
+
+    // Calculate antigravity rate limit
+    const agRateLimit = agConfig.rate_limit ?? 30;
+
     return {
       id: user.id,
       email: user.email,
@@ -252,10 +306,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       discordId: (user as any).discordId || null,
       discordUsername: (user as any).discordUsername || null,
       discordAvatar: (user as any).discordAvatar || null,
-      daily_limit: totalQuota, // Dynamic limit
+      daily_limit: { flash: flashQuota, pro: proQuota, v3: v3Quota, total: totalQuota }, // 分模型配额
       today_used: user.today_used,
       model_usage: modelUsage,
-      antigravity_usage: agUsage,
+      antigravity_usage: { ...agUsage, rate_limit: agRateLimit },
+      rate_limit: userRateLimit, // User's rate limit for Cloud Code
       contributed_active: user._count.credentials,
       contributed_v3_active: v3Count,
       system_config: systemConfig,

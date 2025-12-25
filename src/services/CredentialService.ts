@@ -1,8 +1,14 @@
+/**
+ * 凭证服务
+ * 负责 Google 凭证的上传、验证、刷新和管理
+ */
 import { PrismaClient, CredentialStatus } from '@prisma/client';
 import { request } from 'undici';
 import { z } from 'zod';
 import { CredentialPoolManager } from './CredentialPoolManager';
 import { getUserAgent } from '../utils/system';
+import crypto from 'crypto';
+import { redis } from '../utils/redis';
 
 const prisma = new PrismaClient();
 const poolManager = new CredentialPoolManager();
@@ -16,6 +22,7 @@ let cachedAdminKey: string | null = null;
 /**
  * 获取或创建系统管理员 API Key 用于反代验证
  * 优先使用已有的 ADMIN 类型 Key，没有则自动创建
+ * @returns 系统管理员 API Key
  */
 async function getOrCreateSystemAdminKey(): Promise<string> {
   // 如果已缓存，直接返回
@@ -47,7 +54,6 @@ async function getOrCreateSystemAdminKey(): Promise<string> {
   }
 
   // 3. 为管理员创建一个系统验证专用的 Key
-  const crypto = require('crypto');
   const newKey = 'sk-sys-' + crypto.randomBytes(24).toString('hex');
 
   await prisma.apiKey.create({
@@ -65,8 +71,10 @@ async function getOrCreateSystemAdminKey(): Promise<string> {
   return cachedAdminKey;
 }
 
-
-// Zod schema for input validation
+/**
+ * 凭证输入验证模式
+ * 使用 Zod 库进行类型安全验证
+ */
 const CredentialInputSchema = z.object({
   client_id: z.string().min(1),
   client_secret: z.string().min(1),
@@ -74,10 +82,18 @@ const CredentialInputSchema = z.object({
   project_id: z.string().optional(),
 });
 
+/**
+ * 凭证服务类
+ * 负责 Google 凭证的上传、验证、刷新和管理
+ */
 export class CredentialService {
   /**
-   * Upload and verify a Google OAuth2 Credential.
+   * 上传并验证 Google OAuth2 凭证
    * 流程：解析 -> 获取 Token -> 临时入库 -> 加入池 -> 反代验证 -> 成功保留/失败删除
+   * @param userId 用户 ID
+   * @param jsonContent 凭证 JSON 内容
+   * @param requireV3 是否要求支持 Gemini 3.0
+   * @returns 验证成功的凭证信息
    */
   async uploadAndVerify(userId: number, jsonContent: string, requireV3: boolean = false) {
     // 1. Parse and Validate JSON structure
@@ -193,10 +209,7 @@ export class CredentialService {
     if (!verifySuccess) {
       // 验证失败：从池中移除并删除数据库记录
       try {
-        const Redis = require('ioredis');
-        const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
         await redis.lrem('GLOBAL_CREDENTIAL_POOL', 0, String(tempCredential.id));
-        redis.disconnect();
       } catch { }
 
       await prisma.googleCredential.delete({ where: { id: tempCredential.id } }).catch(() => { });
@@ -244,20 +257,19 @@ export class CredentialService {
 
 
   /**
-   * Swaps a refresh token for a short-lived access token using undici.
-   * Caches the token in Redis to improve performance.
+   * 使用 undici 将 Refresh Token 交换为短期 Access Token
+   * 将令牌缓存到 Redis 中以提高性能
+   * @param clientId 客户端 ID
+   * @param clientSecret 客户端密钥
+   * @param refreshToken 刷新令牌
+   * @returns 访问令牌，或 null（如果刷新失败）
    */
   private async refreshAccessToken(clientId: string, clientSecret: string, refreshToken: string): Promise<string | null> {
     const cacheKey = `ACCESS_TOKEN:${clientId.slice(0, 10)}:${refreshToken.slice(-10)}`; // Simple hash key
 
-    // 1. Try Cache
-    // Create a local redis instance since we can't access poolManager's private one
-    const Redis = require('ioredis');
-    const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
-
+    // 1. Try Cache - 使用共享的 Redis 连接
     const cached = await redis.get(cacheKey);
     if (cached) {
-      redis.disconnect(); // Don't forget to close connection
       return cached;
     }
 
@@ -279,7 +291,6 @@ export class CredentialService {
       if (statusCode !== 200) {
         const errorText = await body.text();
         console.error(`[CredentialService] Token Refresh Failed (${statusCode}):`, errorText);
-        redis.disconnect();
         return null;
       }
 
@@ -291,19 +302,22 @@ export class CredentialService {
         await redis.set(cacheKey, accessToken, 'EX', 3300);
       }
 
-      redis.disconnect();
       return accessToken || null;
 
     } catch (error) {
       console.error('[CredentialService] Token Refresh Network Error:', error);
-      redis.disconnect();
       return null;
     }
   }
 
   /**
-   * Verifies the credential by making a real request to the internal Cloud Code API.
-   * Uses the correct wrapper structure found in gemini-cli-core.
+   * 通过向内部 Cloud Code API 发送实际请求来验证凭证
+   * 使用 gemini-cli-core 中找到的正确包装结构
+   * @param accessToken 访问令牌
+   * @param projectId 项目 ID（可选）
+   * @param modelName 模型名称
+   * @param allow429 是否允许 429 错误
+   * @returns 验证是否成功
    */
   public async verifyCloudCodeAccess(accessToken: string, projectId?: string, modelName: string = 'gemini-2.5-flash', allow429: boolean = true): Promise<boolean> {
     const baseUrl = process.env.GOOGLE_CLOUD_CODE_URL || 'https://cloudcode-pa.googleapis.com';
@@ -493,9 +507,10 @@ export class CredentialService {
   }
 
   /**
-   * Fetch Google account email via userinfo endpoint using access token.
-
-   * Returns null if request fails or email is missing.
+   * 使用访问令牌通过 userinfo 端点获取 Google 账户邮箱
+   * 如果请求失败或缺少邮箱，则返回 null
+   * @param accessToken 访问令牌
+   * @returns Google 账户邮箱，或 null（如果获取失败）
    */
   private async fetchGoogleEmail(accessToken: string): Promise<string | null> {
     const url = 'https://www.googleapis.com/oauth2/v2/userinfo';
@@ -538,9 +553,11 @@ export class CredentialService {
   }
 
   /**
-   * Manually check if a stored credential supports Gemini 3.0
-   * Returns object with detailed result
+   * 手动检查存储的凭证是否支持 Gemini 3.0
+   * 返回包含详细结果的对象
    * 当 Cloud Code API 失败时，通过反代服务验证
+   * @param credential 凭证信息
+   * @returns 包含支持情况和详细信息的对象
    */
   async checkV3Support(credential: any): Promise<{ supported: boolean; error?: string; response?: string }> {
     try {

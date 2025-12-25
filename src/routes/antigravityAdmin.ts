@@ -5,14 +5,14 @@ import { AntigravityService } from '../services/AntigravityService';
 import { ANTIGRAVITY_MODELS } from '../config/antigravityConfig';
 import { generateSessionId } from '../utils/antigravityUtils';
 import { PrismaClient } from '@prisma/client';
-import Redis from 'ioredis';
 import jwt from 'jsonwebtoken';
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
+import Redis from 'ioredis';
+import { redis } from '../utils/redis';
 
 const prisma = new PrismaClient();
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 
 // OAuth 配置 (与原始 antigravity 项目一致)
@@ -1664,9 +1664,8 @@ export default async function antigravityAdminRoutes(app: FastifyInstance) {
 
         const REFRESH_CHANNEL = 'AG_QUOTA_REFRESH_PROGRESS';
 
-        // Create a new Redis connection for subscribing
-        const RedisClient = require('ioredis');
-        const subscriber = new RedisClient(process.env.REDIS_URL || 'redis://localhost:6379');
+        // Create a new Redis connection for subscribing (subscription requires dedicated connection)
+        const subscriber = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
         const sendSSE = (data: any) => {
             try {

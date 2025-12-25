@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue';
 import { api } from '../utils/api';
-import GaugeChart from './GaugeChart.vue';
 
 const props = defineProps<{
     config?: any;
@@ -137,7 +136,7 @@ onMounted(fetchUsers);
             <input
                 v-model="search"
                 @keyup.enter="handleSearch"
-                placeholder="🔍 搜索用户名/邮箱/Discord..."
+                placeholder="🔍 搜索邮箱..."
                 class="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-2 pl-10 text-sm text-white focus:outline-none focus:border-[#8B5CF6] transition-all placeholder-[#A5B4FC]/50"
             >
             <span class="absolute left-3 top-2.5 text-xs text-[#A5B4FC]">🔎</span>
@@ -334,7 +333,7 @@ onMounted(fetchUsers);
             <input type="text" v-model="newPassword" placeholder="输入新密码..." class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 mb-6 text-gray-900 focus:outline-none focus:border-yellow-500 focus:ring-2 focus:ring-yellow-100 transition-all">
             <div class="flex justify-end gap-3">
                 <button @click="showPasswordModal = false" class="px-5 py-2 rounded-xl hover:bg-gray-100 text-sm text-gray-600">取消</button>
-                <button @click="confirmPassword" class="px-5 py-2 bg-yellow-500 hover:bg-yellow-400 text-white rounded-xl font-bold text-sm shadow-lg shadow-yellow-200">重置</button>
+                <button @click="confirmPasswordReset" class="px-5 py-2 bg-yellow-500 hover:bg-yellow-400 text-white rounded-xl font-bold text-sm shadow-lg shadow-yellow-200">重置</button>
             </div>
         </div>
     </div>

@@ -1,7 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { PrismaClient, CredentialStatus } from '@prisma/client';
-import Redis from 'ioredis';
-import { stream } from 'undici';
+import { stream, request as undiciRequest } from 'undici';
 import { CredentialPoolManager } from '../services/CredentialPoolManager';
 import { PassThrough, Transform } from 'stream';
 import { getUserAgent } from '../utils/system';
@@ -20,10 +19,28 @@ import {
     openaiStreamChunkToAnthropic,
     RequestFormat
 } from '../utils/formatConverter';
+import { redis } from '../utils/redis';
 
 const prisma = new PrismaClient();
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 const poolManager = new CredentialPoolManager();
+
+// Lua 脚本：原子化 RPM 限制检查
+// 返回值: 当前计数 (如果已超限返回 -1)
+const RATE_LIMIT_SCRIPT = `
+local key = KEYS[1]
+local limit = tonumber(ARGV[1])
+local ttl = tonumber(ARGV[2])
+
+local current = redis.call('INCR', key)
+if current == 1 then
+    redis.call('EXPIRE', key, ttl)
+end
+
+if current > limit then
+    return -1
+end
+return current
+`;
 
 // 使用 UTC+8 时区计算今日日期字符串，与 today_used 重置时间一致
 function getTodayStrUTC8(): string {
@@ -61,18 +78,28 @@ function getAvailableModels() {
     return [...cloudCodeModels, ...antigravityModels];
 }
 
+/**
+ * 代理控制器
+ * 处理各种 AI 模型的请求代理和转换
+ * 支持 OpenAI、Gemini、Anthropic 等多种格式
+ */
 export class ProxyController {
+    /** 模型缓存，5分钟过期 */
     private static modelsCache: { data: any[]; expiresAt: number } | null = null;
 
+    /**
+     * 处理聊天补全请求
+     * 支持多种模型格式和渠道
+     */
     static async handleChatCompletion(req: FastifyRequest, reply: FastifyReply) {
         const authHeader = req.headers.authorization;
         if (!authHeader?.startsWith('Bearer ')) {
-            return reply.code(401).send({ error: 'Missing API Key' });
+            return reply.code(401).send({ error: '缺少 API 密钥' });
         }
         const apiKeyStr = authHeader.replace('Bearer ', '').trim();
 
-        // 0. Fast Health Check (Before DB/Auth)
-        // Intercept "Hi" messages immediately to speed up connection tests
+        // 0. 快速健康检查 (在数据库/认证之前)
+        // 立即拦截 "Hi" 消息以加速连接测试
         try {
             const body = req.body as any;
             const messages = body.messages || [];
@@ -83,14 +110,14 @@ export class ProxyController {
             }
         } catch (e) { }
 
-        // 1. Auth & Rate Limiting
+        // 1. 认证和速率限制
         const apiKeyData = await prisma.apiKey.findUnique({
             where: { key: apiKeyStr },
             include: { user: true }
         });
 
         if (!apiKeyData || !apiKeyData.is_active) {
-            return reply.code(401).send({ error: 'Invalid or disabled API Key' });
+            return reply.code(401).send({ error: '无效或已禁用的 API 密钥' });
         }
 
         const user = apiKeyData.user;
@@ -101,6 +128,7 @@ export class ProxyController {
 
         const isAdminKey = (apiKeyData as any).type === 'ADMIN';
 
+        // 检查是否强制要求 Discord 绑定
         const forceBindSetting = await prisma.systemSetting.findUnique({ where: { key: 'FORCE_DISCORD_BIND' } });
         const forceDiscordBind = forceBindSetting ? forceBindSetting.value === 'true' : false;
         if (forceDiscordBind && !isAdminKey) {
@@ -110,7 +138,7 @@ export class ProxyController {
             }
         }
 
-        // Fetch counts for permissions
+        // 获取凭证计数（用于权限检查和配额计算）
         // 冷却的凭证仍然算入配额增量，只有 DEAD 的不算
         const activeCredCount = await prisma.googleCredential.count({
             where: { owner_id: user.id, status: { in: [CredentialStatus.ACTIVE, CredentialStatus.COOLING] } }
@@ -122,58 +150,107 @@ export class ProxyController {
         // 全局共享模式拦截已移除；分别在各渠道分支内进行访问控制
 
         if (!isAdminKey) {
-            // Fetch System Config
+            // 获取系统配置
             const configSetting = await prisma.systemSetting.findUnique({ where: { key: 'SYSTEM_CONFIG' } });
-            let rateLimit = 10; // Default Newbie
-            let baseQuota = 300; // Default Newbie Quota
+            let rateLimit = 10; // 默认萌新速率限制
+
+            /**
+             * 辅助函数：从新嵌套格式或旧数字格式中提取配额值
+             * @param levelConfig 等级配置
+             * @param defaultValue 默认值
+             * @returns 包含基础配额和增量配额的对象
+             */
+            const getQuotaValue = (levelConfig: any, defaultValue: number): { base: { flash: number; pro: number; v3: number }, increment: { flash: number; pro: number; v3: number } } => {
+              if (typeof levelConfig === 'number') {
+                // 旧格式：单一数字，按比例分配给各模型
+                return { base: { flash: levelConfig, pro: Math.floor(levelConfig / 4), v3: Math.floor(levelConfig / 4) }, increment: { flash: 0, pro: 0, v3: 0 } };
+              }
+              if (levelConfig && typeof levelConfig === 'object' && levelConfig.base) {
+                // 新嵌套格式：分模型配置基础配额和增量配额
+                return {
+                  base: {
+                    flash: levelConfig.base?.flash ?? defaultValue,
+                    pro: levelConfig.base?.pro ?? Math.floor(defaultValue / 4),
+                    v3: levelConfig.base?.v3 ?? Math.floor(defaultValue / 4)
+                  },
+                  increment: {
+                    flash: levelConfig.increment?.flash ?? 0,
+                    pro: levelConfig.increment?.pro ?? 0,
+                    v3: levelConfig.increment?.v3 ?? 0
+                  }
+                };
+              }
+              // 默认值处理
+              return { base: { flash: defaultValue, pro: Math.floor(defaultValue / 4), v3: Math.floor(defaultValue / 4) }, increment: { flash: 0, pro: 0, v3: 0 } };
+            };
+
+            let totalQuota = 300; // 默认配额
 
             if (configSetting) {
                 try {
                     const conf = JSON.parse(configSetting.value);
                     const limits = conf.rate_limit || {};
 
-                    // Rate Limit Logic (Keep as is, based on level/V3)
-                    if (activeV3CredCount > 0) rateLimit = limits.v3_contributor ?? 120;
-                    else if (activeCredCount > 0) rateLimit = limits.contributor ?? 60;
-                    else rateLimit = limits.newbie ?? 10;
+                    // 速率限制逻辑（基于用户等级/V3凭证数量）
+                    if (activeV3CredCount > 0) rateLimit = limits.v3_contributor ?? 120; // V3贡献者：120 RPM
+                    else if (activeCredCount > 0) rateLimit = limits.contributor ?? 60; // 贡献者：60 RPM
+                    else rateLimit = limits.newbie ?? 10; // 萌新：10 RPM
 
                     const quotaConf = conf.quota || {};
+                    
+                    // 根据用户等级获取配额配置
+                    let levelQuota: { base: { flash: number; pro: number; v3: number }, increment: { flash: number; pro: number; v3: number } };
                     if (activeV3CredCount > 0) {
-                        baseQuota = quotaConf.v3_contributor ?? 3000;
+                        // V3贡献者：3000默认配额
+                        levelQuota = getQuotaValue(quotaConf.v3_contributor, 3000);
                     } else if (activeCredCount > 0) {
-                        baseQuota = quotaConf.contributor ?? 1500;
+                        // 贡献者：1500默认配额
+                        levelQuota = getQuotaValue(quotaConf.contributor, 1500);
                     } else {
-                        baseQuota = quotaConf.newbie ?? 300;
+                        // 萌新：300默认配额
+                        levelQuota = getQuotaValue(quotaConf.newbie, 300);
                     }
-                } catch (e) { }
+                    
+                    // 计算每个模型的总配额（基础配额 + 额外凭证增量）
+                    const additionalCreds = Math.max(0, activeCredCount - 1); // 减去第一个凭证，只计算额外凭证
+                    const flashQuota = levelQuota.base.flash + additionalCreds * levelQuota.increment.flash;
+                    const proQuota = levelQuota.base.pro + additionalCreds * levelQuota.increment.pro;
+                    const v3ModelQuota = levelQuota.base.v3 + additionalCreds * levelQuota.increment.v3;
+                    
+                    // 旧版增量兼容：支持旧的 increment_per_credential 字段
+                    const legacyInc = quotaConf.increment_per_credential ?? 0;
+                    const legacyExtra = additionalCreds * legacyInc;
+                    
+                    // 总配额：所有模型配额之和 + 旧版增量
+                    totalQuota = flashQuota + proQuota + v3ModelQuota + legacyExtra;
+                } catch (e) {
+                    console.error('解析系统配置失败:', e);
+                }
             }
 
-            const systemSetting = await prisma.systemSetting.findUnique({ where: { key: 'SYSTEM_CONFIG' } });
-            const conf = (() => {
-                try { return JSON.parse(systemSetting?.value || '{}'); } catch { return {}; }
-            })();
-            const inc = (conf.quota?.increment_per_credential ?? 1000);
-            const extra = Math.max(0, activeCredCount - 1) * inc;
-            const totalQuota = baseQuota + extra;
-
+            // 配额检查：检查用户今日使用量是否超过总配额
             if (user.today_used >= totalQuota) {
-                return reply.code(402).send({ error: `Daily quota exceeded (${user.today_used}/${totalQuota})` });
+                return reply.code(402).send({ error: `每日配额已用完 (${user.today_used}/${totalQuota})` });
             }
 
+            // 速率限制检查：使用 Redis 实现每分钟请求数限制
             const rateKey = `RATE_LIMIT:${user.id}`;
             const currentRate = await redis.incr(rateKey);
-            if (currentRate === 1) await redis.expire(rateKey, 60);
+            if (currentRate === 1) {
+                await redis.expire(rateKey, 60); // 设置 60 秒过期
+            }
             if (currentRate > rateLimit) {
-                return reply.code(429).send({ error: `Rate limit exceeded (${rateLimit}/min)` });
+                return reply.code(429).send({ error: `速率限制已超出 (${rateLimit}/分钟)` });
             }
         }
 
-        // 2. Parse Request
+        // 2. 解析请求
         const openAIBody = req.body as any;
+        // 兼容 prompt 参数格式：如果没有 messages，将 prompt 转换为 messages
         if (!openAIBody.messages && typeof openAIBody.prompt === 'string') {
             openAIBody.messages = [{ role: 'user', content: String(openAIBody.prompt) }];
         }
-        // Clamp temperature in incoming body to sane range for Antigravity path
+        // 将 temperature 限制在合理范围内，避免极端值影响反重力渠道
         if (typeof openAIBody.temperature === 'number') {
             openAIBody.temperature = Math.min(1.0, Math.max(0.1, openAIBody.temperature));
         }
@@ -185,15 +262,16 @@ export class ProxyController {
             return ProxyController.handleAntigravityRequest(req, reply, openAIBody, user, isAdminKey);
         }
 
-        // Model Mapping Logic (Cloud Code 渠道)
+        // Cloud Code 渠道模型映射逻辑
         let realModelName = requestedModel;
         let useFakeStream = false;
 
+        // 处理模型后缀：移除公益站相关后缀
         if (requestedModel.includes('-[星星公益站-CLI渠道]') || requestedModel.includes('-[星星公益站-任何收费都是骗子]') || requestedModel.includes('-[星星公益站-所有收费都骗子]')) {
-            // Remove suffix
+            // 移除后缀
             let base = requestedModel.replace('-[星星公益站-CLI渠道]', '').replace('-[星星公益站-任何收费都是骗子]', '').replace('-[星星公益站-所有收费都骗子]', '');
 
-            // Check strategy
+            // 检查流策略
             if (base.includes('-假流')) {
                 useFakeStream = true;
                 realModelName = base.replace('-假流', '');
@@ -204,12 +282,12 @@ export class ProxyController {
             }
         }
 
-        // V3 Logic
+        // V3 模型逻辑
         const isV3Model = realModelName.includes('gemini-3') || realModelName.includes('gemini-exp');
         let poolType: 'GLOBAL' | 'V3' = 'GLOBAL';
 
         if (isV3Model) {
-            // Check V3 Permissions
+            // 检查 V3 权限
             const isAdmin = user.role === 'ADMIN';
             const hasV3Creds = activeV3CredCount > 0;
             // 新增开关：允许未上传或无3.0Pro权限也可使用3.0系列（CLI）
@@ -378,13 +456,16 @@ export class ProxyController {
             console.error('Failed to load ANTIGRAVITY_CONFIG', e);
         }
 
-        // 反重力渠道速率限制检查（每分钟请求数限制）
+        // 反重力渠道速率限制检查（每分钟请求数限制）- 使用 Lua 脚本保证原子性
         if (!isAdminKey && agRateLimit > 0) {
             const now = Math.floor(Date.now() / 60000); // 当前分钟
             const rateKey = `AG_RATE:${user.id}:${now}`;
-            const current = parseInt((await redis.get(rateKey)) || '0', 10);
+            
+            // 使用 Lua 脚本原子化执行: INCR + 条件 EXPIRE + 限制检查
+            // 返回 -1 表示已超限，否则返回当前计数
+            const result = await redis.eval(RATE_LIMIT_SCRIPT, 1, rateKey, agRateLimit, 120) as number;
 
-            if (current >= agRateLimit) {
+            if (result === -1) {
                 return reply.code(429).send({
                     error: {
                         message: `反重力渠道速率限制：每分钟最多 ${agRateLimit} 次请求，请稍后再试`,
@@ -392,10 +473,6 @@ export class ProxyController {
                     }
                 });
             }
-
-            // 增加计数并设置 2 分钟过期
-            await redis.incr(rateKey);
-            await redis.expire(rateKey, 120);
         }
 
         // Calculate Base Limit (Token or Request count)
@@ -1280,8 +1357,7 @@ export class ProxyController {
                         }).then(() => resolve()).catch(reject);
                     });
                 } else {
-                    const { request } = require('undici');
-                    const { statusCode, body } = await request(endpoint, {
+                    const { statusCode, body } = await undiciRequest(endpoint, {
                         method: 'POST',
                         headers,
                         body: JSON.stringify(finalPayload)

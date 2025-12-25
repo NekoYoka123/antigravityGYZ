@@ -1,12 +1,10 @@
 import cron from 'node-cron';
-import { PrismaClient, CredentialStatus } from '@prisma/client';
-import Redis from 'ioredis';
+import { CredentialStatus } from '@prisma/client';
 import axios from 'axios';
 import { AntigravityService } from './AntigravityService';
 import { antigravityQuotaCache } from './AntigravityQuotaCache';
-
-const prisma = new PrismaClient();
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+import { redis } from '../utils/redis';
+import { prisma } from '../utils/prisma';
 const POOL_KEY = 'GLOBAL_CREDENTIAL_POOL';
 const POOL_KEY_V3 = 'GLOBAL_CREDENTIAL_POOL_V3';
 
@@ -94,21 +92,26 @@ export class CronService {
 
             console.log(`[CronService] Found ${cooledCreds.length} credentials ready to be restored.`);
 
-            for (const cred of cooledCreds) {
-                // Transaction: Update DB -> Push to Redis
-                // Note: Redis push isn't part of Prisma transaction, so we do it after.
-
-                await prisma.googleCredential.update({
-                    where: { id: cred.id },
-                    data: {
-                        status: CredentialStatus.ACTIVE,
-                        cooling_expires_at: null,
-                        fail_count: 0 // Reset fail count on restoration
-                    }
-                });
-
-                await redis.rpush(POOL_KEY, String(cred.id));
-                console.log(`[CronService] Restored Credential ${cred.id} to ACTIVE pool.`);
+            // 批量更新数据库和Redis
+            // 1. 先更新所有数据库记录
+            const updatedCreds = await Promise.all(
+                cooledCreds.map(cred => 
+                    prisma.googleCredential.update({
+                        where: { id: cred.id },
+                        data: {
+                            status: CredentialStatus.ACTIVE,
+                            cooling_expires_at: null,
+                            fail_count: 0 // Reset fail count on restoration
+                        }
+                    })
+                )
+            );
+            
+            // 2. 使用批量操作将所有凭证ID添加到Redis
+            const credentialIds = updatedCreds.map(cred => String(cred.id));
+            if (credentialIds.length > 0) {
+                await redis.rpush(POOL_KEY, ...credentialIds);
+                console.log(`[CronService] Restored ${credentialIds.length} credentials to ACTIVE pool.`);
             }
 
         } catch (error) {
@@ -444,47 +447,7 @@ export class CronService {
         }
     }
 
-    /**
-     * Partial refresh of Antigravity quotas cache to reduce rate limits.
-     * Select tokens by id % batchDiv === batchMod.
-     * @deprecated Use refreshAntigravityQuotasFull instead
-     */
-    async refreshAntigravityQuotasPartial(batchMod: number, batchDiv: number) {
-        try {
-            const tokens = await prisma.antigravityToken.findMany({
-                where: { is_enabled: true, status: 'ACTIVE' },
-                select: { id: true, access_token: true, refresh_token: true, expires_in: true, timestamp: true, project_id: true }
-            });
-            const selected = tokens.filter(t => (t.id % batchDiv) === batchMod);
-            let ok = 0, skipped = 0;
-            for (const t of selected) {
-                const tokenData = {
-                    id: t.id,
-                    access_token: t.access_token,
-                    refresh_token: t.refresh_token,
-                    expires_in: t.expires_in,
-                    timestamp: t.timestamp,
-                    project_id: t.project_id,
-                    session_id: String(t.id) // stable session id
-                };
-                try {
-                    await antigravityQuotaCache.refreshToken(tokenData as any);
-                    ok++;
-                    await new Promise(r => setTimeout(r, 100)); // mild pacing
-                } catch (e: any) {
-                    const status = e?.statusCode || e?.response?.status;
-                    if (status === 429 || status === 503) {
-                        skipped++;
-                        continue;
-                    }
-                    skipped++;
-                }
-            }
-            console.log(`[CronService] Quotas batch ${batchMod}/${batchDiv} refreshed: ok=${ok}, skipped=${skipped}, total=${selected.length}`);
-        } catch (err) {
-            console.error('[CronService] Failed to refresh Antigravity quotas batch:', (err as any)?.message || err);
-        }
-    }
+
 
     /**
      * Full refresh of all Antigravity token quotas with high concurrency.

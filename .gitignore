@@ -32,10 +32,27 @@ Thumbs.db
 
 # Testing
 coverage/
+*.test.*
+*_test.*
+test_*.ts
+test_*.js
+scripts/test_*.ts
+scripts/test_*.js
+scripts/*.test.*
+scripts/*_test.*
+*.spec.*
 
 # Prisma
 prisma/*.db
 prisma/*.db-journal
+
+# Docker
+*.dockerignore
+docker-compose.yml
+docker-compose.yaml
+docker-compose.*.yml
+docker-compose.*.yaml
+docker-compose.override.*
 
 # AL (from remote template, kept just in case)
 .alcache/

@@ -8,10 +8,9 @@ import {
 } from '../utils/antigravityUtils';
 import { makeHttpError } from '../utils/http';
 import { PrismaClient } from '@prisma/client';
-import Redis from 'ioredis';
+import { redis } from '../utils/redis';
 
 const prisma = new PrismaClient();
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
 interface StreamState {
     toolCalls: any[];
