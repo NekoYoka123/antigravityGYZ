@@ -64,3 +64,12 @@ rad.json
 *.g.xlf
 *.flf
 TestResults.xml
+
+# Migration scripts and backups
+backup-database.js
+check-db-connection.js
+migrate-data.js
+simple-verify.js
+verify-migration.js
+backup/
+backups/
