@@ -1,0 +1,66 @@
+# Dependencies
+node_modules/
+client/node_modules/
+
+# Production build
+dist/
+build/
+client/dist/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+logs/
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+.trae/
+*.swp
+*.swo
+
+# Testing
+coverage/
+*.test.*
+*_test.*
+test_*.ts
+test_*.js
+scripts/test_*.ts
+scripts/test_*.js
+scripts/*.test.*
+scripts/*_test.*
+*.spec.*
+
+# Prisma
+prisma/*.db
+prisma/*.db-journal
+
+# Docker
+*.dockerignore
+docker-compose.yml
+docker-compose.yaml
+docker-compose.*.yml
+docker-compose.*.yaml
+docker-compose.override.*
+
+# AL (from remote template, kept just in case)
+.alcache/
+.alpackages/
+.snapshots/
+.output/
+*.app
+rad.json
+*.g.xlf
+*.flf
+TestResults.xml
